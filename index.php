@@ -4054,6 +4054,12 @@ systemctl reload apache2</code>
             let html = '<div style="text-align: center; margin-bottom: 20px;">';
             html += '<p style="margin: 5px 0;"><strong>Current Version:</strong> v' + currentVersion + '</p>';
 
+            // Show update source
+            const source = updateData.source || 'unknown';
+            const sourceLabel = source === 'github' ? 'GitHub (stable)' : (source === 'dev' ? 'Dev Server (beta)' : source);
+            const sourceColor = source === 'github' ? '#4CAF50' : '#ff9800';
+            html += '<p style="margin: 5px 0; font-size: 11px;"><span style="background: ' + sourceColor + '; color: white; padding: 2px 8px; border-radius: 10px; font-size: 10px;">' + sourceLabel + '</span></p>';
+
             if (updateData.error && !updateData.latest_version) {
                 html += '<p style="color: #f44336;">' + updateData.error + '</p>';
             } else if (updateData.update_available) {
