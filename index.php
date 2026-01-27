@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.1.5');
+define('WEBSHARE_VERSION', '3.1.6');
 
 // Dynamic base URL for installation scripts
 $baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'your-server.com');

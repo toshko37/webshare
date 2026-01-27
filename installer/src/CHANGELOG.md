@@ -2,6 +2,11 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.1.6] - 2026-01-27
+
+### Added
+- Update source badge in Update modal (GitHub/Dev Server indicator)
+
 ## [3.1.5] - 2026-01-27
 
 ### Added
