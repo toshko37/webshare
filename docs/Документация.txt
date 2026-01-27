@@ -1,0 +1,157 @@
+╦ ╦┌─┐┌┐ ╔═╗┬ ┬┌─┐┬─┐┌─┐
+║║║├┤ ├┴┐╚═╗├─┤├─┤├┬┘├┤
+╚╩╝└─┘└─┘╚═╝┴ ┴┴ ┴┴└─└─┘
+
+ДОКУМЕНТАЦИЯ v3.1
+=================
+
+СЪДЪРЖАНИЕ
+----------
+1. Основни функции
+2. URL адреси
+3. Настройки за upload
+4. Потребители
+5. Споделяне на файлове
+6. API Upload
+7. Live Update
+8. GeoIP ограничения
+9. Отстраняване на проблеми
+
+
+1. ОСНОВНИ ФУНКЦИИ
+------------------
+• Drag & drop качване на файлове
+• Организация в папки (до 3 нива)
+• Публични линкове за споделяне
+• Криптиране на файлове (AES-256-GCM)
+• Споделяне на форматиран текст
+• GeoIP контрол на достъпа
+• Одит лог на всички действия
+• API за външен upload (Windows интеграция)
+
+
+2. URL АДРЕСИ
+-------------
+Главен интерфейс:     https://ВАШИЯ-ДОМЕЙН/
+Публичен upload:      https://ВАШИЯ-ДОМЕЙН/u
+Споделяне на текст:   https://ВАШИЯ-ДОМЕЙН/t
+Публични файлове:     https://ВАШИЯ-ДОМЕЙН/p?t=ТОКЕН
+
+
+3. НАСТРОЙКИ ЗА UPLOAD
+----------------------
+Текущ лимит: 10GB
+
+За промяна редактирайте:
+
+/var/www/webshare/.htaccess:
+  php_value upload_max_filesize 10G
+  php_value post_max_size 10G
+
+/var/www/webshare/.user.ini:
+  upload_max_filesize = 10G
+  post_max_size = 10G
+
+След промените:
+  systemctl restart apache2
+
+
+4. ПОТРЕБИТЕЛИ
+--------------
+Управление: Settings → Users (само admin)
+
+Добавяне на потребител:
+  htpasswd /var/www/webshare/.htpasswd USERNAME
+
+Промяна на парола:
+  htpasswd /var/www/webshare/.htpasswd USERNAME
+
+Изтриване на потребител:
+  htpasswd -D /var/www/webshare/.htpasswd USERNAME
+
+Първият потребител "admin" има администраторски права.
+
+
+5. СПОДЕЛЯНЕ НА ФАЙЛОВЕ
+-----------------------
+1. Натиснете "Share" бутона до файл
+2. Копирайте генерирания линк
+3. Всеки с линка може да изтегли файла БЕЗ парола
+
+Формат на линка: https://ДОМЕЙН/p?t=abc123
+
+За да спрете споделянето:
+• Натиснете "New ID" за нов токен (стария спира да работи)
+• Или изтрийте файла
+
+
+6. API UPLOAD
+-------------
+За качване на файлове от командния ред или скриптове.
+
+1. Генерирайте API ключ: Help → API Upload → Generate Key
+2. Използвайте ключа:
+
+curl -X POST -H "X-API-Key: ВАШИЯ_КЛЮЧ" \
+  -F "file=@документ.pdf" \
+  https://ДОМЕЙН/api-upload.php
+
+Windows интеграция:
+• Свалете .bat и .reg файловете от Help → API Upload
+• Запазете .bat в C:\Scripts\
+• Изпълнете .reg файла
+• Кликнете с десен бутон на файл → "Upload to WebShare"
+
+
+7. LIVE UPDATE
+--------------
+Обновяване от браузъра без SSH:
+
+1. Кликнете на версията в header-а (напр. v3.1.6)
+2. Натиснете "Live Update" или "Force Update"
+3. Изчакайте завършване и автоматичен refresh
+
+Или от терминала:
+  cd /var/www/webshare
+  ./update.sh -y
+
+
+8. GEOIP ОГРАНИЧЕНИЯ
+--------------------
+Ограничаване на достъпа по държави (само за публични страници).
+
+Настройки: Settings → Geo Restriction
+
+Конфигурационен файл: .geo.json
+{
+    "enabled": true,
+    "allowed_countries": ["BG", "US"],
+    "blocked_countries": []
+}
+
+
+9. ОТСТРАНЯВАНЕ НА ПРОБЛЕМИ
+---------------------------
+500 Internal Server Error:
+  tail -f /var/log/apache2/error.log
+
+403 Forbidden:
+  • Проверете .htpasswd съществува
+  • Проверете правата: chown -R www-data:www-data /var/www/webshare
+
+Upload не работи:
+  • Проверете лимитите в .htaccess
+  • Проверете дисковото пространство
+
+GeoIP не работи:
+  apt install php-maxminddb
+  systemctl restart apache2
+
+
+КОНТАКТИ
+--------
+GitHub: https://github.com/toshko37/webshare
+Issues: https://github.com/toshko37/webshare/issues
+
+---
+WebShare - Просто споделяне на файлове

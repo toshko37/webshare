@@ -1,0 +1,38 @@
+╦ ╦┌─┐┌┐ ╔═╗┬ ┬┌─┐┬─┐┌─┐
+║║║├┤ ├┴┐╚═╗├─┤├─┤├┬┘├┤
+╚╩╝└─┘└─┘╚═╝┴ ┴┴ ┴┴└─└─┘
+
+Welcome to WebShare!
+====================
+
+WebShare is a simple, self-hosted file sharing system.
+
+Quick Start:
+------------
+1. Upload files by dragging them here or clicking "Upload"
+2. Create folders to organize your files
+3. Share files using the "Share" button
+4. Encrypt sensitive files with the lock icon
+
+Features:
+---------
+• Drag & drop file upload
+• Folder organization (up to 3 levels)
+• Public share links
+• File encryption (AES-256)
+• Rich text sharing
+• GeoIP access control
+• Audit logging
+
+URLs:
+-----
+• Main interface: /
+• Public upload:  /u
+• Text sharing:   /t
+• Public files:   /p?t=TOKEN
+
+For more information, see README.md or visit:
+https://github.com/toshko37/webshare
+
+---
+This file was created during setup. You can safely delete it.

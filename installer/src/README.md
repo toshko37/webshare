@@ -1,6 +1,9 @@
 # WebShare
 
-**WebShare** is a simple, self-hosted file sharing application with multi-user support, folder organization, file encryption, and email sharing capabilities.
+**WebShare** is a simple, self-hosted file sharing application with multi-user support, folder organization, file encryption, and one-click updates.
+
+![Version](https://img.shields.io/github/v/release/toshko37/webshare)
+![License](https://img.shields.io/badge/license-MIT-blue)
 
 ## Features
 
@@ -8,105 +11,63 @@
 - **Drag & Drop Upload** - Upload files by dragging them to the browser
 - **Folder System** - Organize files in user folders and subfolders (up to 3 levels)
 - **File Operations** - Rename, move, delete files
-- **File Sharing** - Generate public links with optional expiration
+- **File Sharing** - Generate public links with unique tokens
 - **Web Download** - Download files from URL directly to server
+- **API Upload** - Upload via API with Windows right-click integration
 
 ### Security
 - **User Authentication** - Apache Basic Auth with .htpasswd
 - **File Encryption** - AES-256-GCM encryption for sensitive files
-- **GeoIP Filtering** - Restrict access by country
+- **GeoIP Filtering** - Restrict access by country (public pages only)
 - **CSRF Protection** - All forms protected against CSRF attacks
-- **Audit Logging** - Track all user actions
+- **Audit Logging** - Track all user actions with country detection
 
 ### Sharing
-- **Public Links** - Share files via token-based URLs
+- **Public Links** - Share files via short token-based URLs (`/p?t=abc123`)
 - **Email Sharing** - Send share links via email (SMTP)
-- **Text Sharing** - Share rich text with syntax highlighting
+- **Text Sharing** - Share rich text with Quill.js editor
+- **Public Upload** - Allow others to upload without seeing existing files (`/u`)
 
-### Additional
-- **Multi-language** - Interface supports multiple languages
-- **Responsive Design** - Works on desktop and mobile
-- **No Database** - All data stored in JSON files
+### Updates
+- **Live Update** - One-click update from browser (no SSH needed)
+- **Auto-check** - Automatic version check from GitHub releases
+- **Dual Source** - Check GitHub (stable) or dev server (beta)
+- **Shell Update** - Traditional `./update.sh` script
+
+## Quick Start
+
+### Option 1: GitHub Clone (Recommended)
+
+```bash
+git clone https://github.com/toshko37/webshare.git
+cd webshare
+sudo ./setup.sh
+htpasswd -c .htpasswd admin
+```
+
+### Option 2: Remote Install
+
+```bash
+curl -fsSL https://webshare.techbg.net/get | sudo bash -s -- your-domain.com
+```
+
+### Option 3: Manual Setup
+
+1. Download and extract WebShare
+2. Run `./setup.sh` to initialize
+3. Create admin user: `htpasswd -c .htpasswd admin`
+4. Configure Apache virtual host
 
 ## Requirements
 
-### Minimum
-- PHP 7.4 or higher
-- Apache with mod_rewrite
-- 50MB disk space (plus storage for files)
-
-### Recommended
-- PHP 8.0+
-- php-xml (for DOMDocument)
-- php-curl (for web download)
-- php-mbstring (for text handling)
-- php-maxminddb (for GeoIP)
-
-## Installation
-
-### Method 1: GitHub Clone (Recommended)
-
-```bash
-# Clone the repository
-git clone https://github.com/toshko37/webshare.git
-cd webshare
-
-# Run setup script
-chmod +x setup.sh
-./setup.sh
-
-# Create admin user
-htpasswd -c .htpasswd admin
-
-# Or use full installer for Apache + SSL setup
-sudo ./install-local.sh
-```
-
-### Method 2: Remote Install (Quick)
-
-If you have an existing WebShare server, you can install from there:
-```bash
-curl -fsSL https://your-webshare-server.com/get | bash
-```
-
-### Method 3: Manual Installation
-
-1. Download/clone WebShare files
-2. Run the setup script:
-```bash
-./setup.sh
-```
-3. Create admin user:
-```bash
-htpasswd -c .htpasswd admin
-```
-4. Configure Apache virtual host (see below)
-
-### What setup.sh Does
-
-- Creates required directories (`files/`, `texts/`, `backups/`)
-- Downloads GeoIP database (GeoLite2-Country.mmdb)
-- Installs Composer dependencies
-- Creates default configuration files
-- Sets correct file permissions
+- **PHP 7.4+** (8.0+ recommended)
+- **Apache** with mod_rewrite
+- **Extensions**: php-xml, php-curl, php-mbstring
+- **Optional**: php-maxminddb (for GeoIP)
 
 ## Configuration
 
 ### Apache Virtual Host
-
-```apache
-<VirtualHost *:80>
-    ServerName webshare.example.com
-    DocumentRoot /var/www/webshare
-
-    <Directory /var/www/webshare>
-        AllowOverride All
-        Require all granted
-    </Directory>
-</VirtualHost>
-```
-
-### SSL (Recommended)
 
 ```apache
 <VirtualHost *:443>
@@ -124,108 +85,84 @@ htpasswd -c .htpasswd admin
 </VirtualHost>
 ```
 
-### Email Settings (Optional)
+### Configuration Files
 
-Configure in Settings tab:
-- SMTP Host (e.g., mail.example.com)
-- SMTP Port (465 for SSL, 587 for TLS)
-- SMTP User
-- SMTP Password
-- Encryption (SSL/TLS)
+| File | Purpose |
+|------|---------|
+| `.htpasswd` | User credentials |
+| `.config.json` | SMTP and site settings |
+| `.geo.json` | GeoIP country filtering |
+| `.update-config.json` | Update source (stable/beta) |
 
-### GeoIP Settings (Optional)
+## Updating
 
-Create `.geo.json`:
-```json
-{
-    "enabled": true,
-    "allowed_countries": ["BG", "US", "DE"],
-    "blocked_countries": [],
-    "allow_unknown": false
-}
+### From Browser (Live Update)
+
+1. Click version number in header
+2. Click **"Live Update"** button
+3. Wait for completion and auto-refresh
+
+### From Terminal
+
+```bash
+cd /var/www/webshare
+./update.sh -y
 ```
+
+## API Upload
+
+Upload files via command line or scripts:
+
+```bash
+curl -X POST -H "X-API-Key: YOUR_KEY" -F "file=@document.pdf" \
+  https://your-server.com/api-upload.php
+```
+
+Generate API keys in **Help → API Upload** section.
 
 ## File Structure
 
 ```
 webshare/
 ├── index.php           # Main application
-├── upload.php          # File upload handler
-├── download.php        # File download handler
-├── share.php           # Share link generator
-├── public.php          # Public file access
-├── text.php            # Text storage backend
-├── t.php               # Text sharing interface
-├── send-mail.php       # Email sending API
-├── web-download.php    # URL download handler
-├── .htaccess           # Apache configuration
-├── .htpasswd           # User credentials
-├── .config.json        # Site configuration
-├── .geo.json           # GeoIP configuration
-├── files/              # User files
+├── files/              # Uploaded files
 │   ├── _public/        # Public folder
 │   └── [username]/     # User folders
 ├── texts/              # Shared texts
-└── assets/             # Static assets
-    └── quill/          # Quill.js editor
+├── assets/quill/       # Rich text editor
+├── .htpasswd           # User credentials
+├── .config.json        # Configuration
+└── version.json        # Version info
 ```
 
-## Updating
+## Security
 
-### Automatic Update
-
-```bash
-cd /path/to/webshare
-./update.sh
-```
-
-### Manual Update
-
-Download new files and replace, preserving:
-- `files/` directory
-- `texts/` directory
-- `.htpasswd`
-- `.config.json`
-- `.geo.json`
-- `GeoLite2-Country.mmdb`
+- Always use **HTTPS** in production
+- Use **strong passwords** for all users
+- Enable **GeoIP filtering** if possible
+- Configure **fail2ban** for brute-force protection
+- Regular **backups** of files/ and config
 
 ## Troubleshooting
 
-### 500 Internal Server Error
-- Check Apache error log: `tail -f /var/log/apache2/error.log`
-- Verify PHP is installed: `php -v`
-- Check .htaccess is enabled: `AllowOverride All` in Apache config
+| Issue | Solution |
+|-------|----------|
+| 500 Error | Check `tail -f /var/log/apache2/error.log` |
+| 403 Forbidden | Verify .htpasswd exists and permissions |
+| Upload fails | Check PHP limits in .htaccess |
+| GeoIP not working | Install php-maxminddb |
 
-### 403 Forbidden
-- Check file permissions: `ls -la`
-- Verify .htpasswd exists and is readable
+## Links
 
-### Files Not Uploading
-- Check PHP upload limits in `.htaccess` or `php.ini`
-- Verify `files/` directory is writable
-
-### GeoIP Not Working
-- Install php-maxminddb: `apt install php-maxminddb`
-- Download database: `GeoLite2-Country.mmdb`
-
-### Email Not Sending
-- Verify SMTP settings in Settings tab
-- Check MX records for recipient domain
-- Test with the Test button before saving
-
-## Security Recommendations
-
-1. **Use HTTPS** - Always use SSL/TLS in production
-2. **Strong Passwords** - Use strong passwords for all users
-3. **Regular Updates** - Keep WebShare and PHP updated
-4. **Backup** - Regularly backup `files/`, `.htpasswd`, and config files
-5. **Firewall** - Restrict access to trusted IPs if possible
-6. **fail2ban** - Configure fail2ban for brute-force protection
+- **Repository**: https://github.com/toshko37/webshare
+- **Releases**: https://github.com/toshko37/webshare/releases
+- **Issues**: https://github.com/toshko37/webshare/issues
 
 ## License
 
-MIT License - See LICENSE file for details.
+MIT License - See [LICENSE](LICENSE) file.
 
 ---
 
 **WebShare** - Simple, secure file sharing.
+Created by [Todor Karachorbadzhiev](https://github.com/toshko37)

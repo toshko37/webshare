@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.1.6');
+define('WEBSHARE_VERSION', '3.1.7');
 
 // Dynamic base URL for installation scripts
 $baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'your-server.com');
@@ -5314,6 +5314,7 @@ systemctl reload apache2</code>
 
             <div style="text-align: center; padding-top: 15px; border-top: 1px solid #eee;">
                 <p style="margin: 5px 0; color: #555;">Created by <strong>Todor Karachorbadzhiev</strong></p>
+                <p style="margin: 5px 0; font-size: 12px;"><a href="mailto:webshare@techbg.net" style="color: #1976D2; text-decoration: none;">webshare@techbg.net</a></p>
                 <p style="margin: 5px 0; font-size: 12px; color: #999;">2025-2026</p>
                 <a href="https://github.com/toshko37/webshare" target="_blank" style="display: inline-block; margin-top: 10px; font-size: 13px; color: #1976D2; text-decoration: none;">
                     GitHub Repository →

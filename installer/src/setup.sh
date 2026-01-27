@@ -29,8 +29,24 @@ fi
 
 # 1. Create required directories
 echo -e "${GREEN}[1/7] Creating directories...${NC}"
-mkdir -p files texts backups assets/quill
-echo "  ✓ files/, texts/, backups/, assets/quill/ created"
+FILES_NEW=false
+if [ ! -d "files" ]; then
+    FILES_NEW=true
+fi
+mkdir -p files texts backups assets/quill docs
+echo "  ✓ files/, texts/, backups/, assets/quill/, docs/ created"
+
+# Copy welcome files to files/ if it was just created (empty)
+if [ "$FILES_NEW" = true ] && [ -d "docs" ]; then
+    if [ -f "docs/Welcome.txt" ]; then
+        cp "docs/Welcome.txt" "files/"
+        echo "  ✓ Welcome.txt added to files/"
+    fi
+    if [ -f "docs/Документация.txt" ]; then
+        cp "docs/Документация.txt" "files/"
+        echo "  ✓ Документация.txt added to files/"
+    fi
+fi
 
 # 2. Install system dependencies
 echo -e "${GREEN}[2/7] Checking system dependencies...${NC}"

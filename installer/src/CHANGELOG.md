@@ -2,6 +2,16 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.1.7] - 2026-01-27
+
+### Added
+- Welcome files auto-copy during installation (Welcome.txt, Документация.txt)
+- Documentation files in docs/ folder
+
+### Changed
+- setup.sh now copies welcome files to files/ when created
+- Updated README.md with new features
+
 ## [3.1.6] - 2026-01-27
 
 ### Added
