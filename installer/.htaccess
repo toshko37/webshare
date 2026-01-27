@@ -1,0 +1,12 @@
+# Allow public access to installer files
+Require all granted
+Satisfy any
+
+# Disable directory browsing
+Options -Indexes
+
+# Serve PHP files as plain text (don't execute them)
+<FilesMatch "\.php$">
+    SetHandler text/plain
+    ForceType text/plain
+</FilesMatch>

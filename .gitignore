@@ -1,0 +1,54 @@
+# User data - never commit
+files/
+texts/
+.htpasswd
+
+# User metadata
+.api-keys.json
+.audit.json
+.encryption-keys.json
+.files-meta.json
+.tokens.json
+.texts.json
+.version-check.json
+.update-config.json
+
+# Configuration (sensitive)
+.config.json
+.geo.json
+.mail-ratelimit.json
+settings.json
+
+# GeoIP database
+*.mmdb
+
+# Backups and archives
+backups/
+*.tar.gz
+*.backup
+
+# Composer dependencies
+vendor/
+composer.lock
+
+# Claude config
+.claude/
+
+# SSL/ACME
+.well-known/
+
+# Local notes
+НАСТРОЙКИ.txt
+
+# PHP config
+.user.ini
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

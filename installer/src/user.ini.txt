@@ -1,0 +1,17 @@
+; PHP Configuration for WebShare
+; ================================
+; This file allows PHP settings to be configured per-directory
+; Changes take effect after php-fpm reload
+
+; Upload settings for 10GB files
+upload_max_filesize = 10G
+post_max_size = 10G
+memory_limit = 512M
+
+; Execution time limits (2 hours for large uploads)
+max_execution_time = 7200
+max_input_time = 7200
+
+; File upload settings
+file_uploads = On
+max_file_uploads = 20

@@ -1,0 +1,18 @@
+#!/bin/bash
+#
+# WebShare Update Downloader
+# Usage: curl -fsSL https://webshare.techbg.net/get-update | bash
+#
+
+set -e
+
+UPDATE_SCRIPT="/tmp/webshare-update-$$.sh"
+SOURCE_URL="https://webshare.techbg.net/installer/update.sh"
+
+echo "Downloading WebShare update script..."
+curl -fsSL "$SOURCE_URL" -o "$UPDATE_SCRIPT"
+chmod +x "$UPDATE_SCRIPT"
+
+echo "Running update..."
+# Auto-confirm since we're running through pipe (non-interactive)
+exec "$UPDATE_SCRIPT" -y
