@@ -45,7 +45,7 @@ if (file_exists($configFile)) {
 }
 $speedtestUrl = $config['speedtest_url'] ?? '';
 
-// Generate unique filename if file already exists
+// Generate unique filename if file already exists (uses unique ID to prevent race conditions)
 function getUniqueFilename($directory, $filename) {
     if (!file_exists($directory . $filename)) {
         return $filename;
@@ -55,12 +55,9 @@ function getUniqueFilename($directory, $filename) {
     $name = $info['filename'];
     $ext = isset($info['extension']) ? '.' . $info['extension'] : '';
 
-    $counter = 1;
-    while (file_exists($directory . $name . '_' . $counter . $ext)) {
-        $counter++;
-    }
-
-    return $name . '_' . $counter . $ext;
+    // Use unique ID instead of counter to prevent TOCTOU race condition
+    $uniqueId = bin2hex(random_bytes(4)); // 8 hex chars
+    return $name . '_' . $uniqueId . $ext;
 }
 
 // Handle partial file deletion (from Stop button)

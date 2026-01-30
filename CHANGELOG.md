@@ -2,10 +2,47 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.2.0] - 2026-01-29
+
+### Security (14 of 15 issues fixed)
+- **CRITICAL**: Removed plain text password storage in encryption system
+- **HIGH**: Enabled SSL certificate verification for web downloads
+- **HIGH**: Removed password from GET parameters (now POST only)
+- **HIGH**: Added CSRF protection to all forms and AJAX endpoints
+- **HIGH**: API keys now support IP binding with auto-learn
+- **HIGH**: Hidden SMTP password in settings (no longer visible in HTML)
+- **MEDIUM**: Strengthened share tokens from 6 to 32 characters (128 bits)
+- **MEDIUM**: Improved path traversal protection with secureFolderPath()
+- **MEDIUM**: Added security headers (X-Frame-Options, X-XSS-Protection, etc.)
+- **MEDIUM**: Added session fixation prevention (session_regenerate_id)
+- **MEDIUM**: Added dangerous file extension blocking (php, phar, htaccess)
+- **LOW**: Fixed timing attack vulnerability (hash_equals)
+- **LOW**: Fixed race condition in file naming (unique ID instead of counter)
+- Verified: Command execution (htpasswd) is properly escaped
+
+### Added
+- **Multiple API keys per user** - Create unlimited keys with different settings
+- **IP auto-learn** - Keys lock to first IP used (empty = auto-learn, 0.0.0.0/0 = any)
+- **API upload options** - overwrite=1 (replace files), encrypt=1 (encrypt on upload)
+- **DateTime suffix** - Duplicate files get timestamp instead of random chars
+- **Close button** - Added to text view page
+- **Audit log improvement** - Shows API key name and ID for uploads
+- **Remove registry** - Commands included as comments in BAT/PS1 scripts
+
+### Fixed
+- .reg file escaping for Windows paths (C:\\Scripts\\ instead of C:\Scripts\)
+- Text sharing 32-char tokens with proper .htaccess routing
+
+### Changed
+- API key storage format (auto-migrates from old format)
+- File duplicate naming: `file_20260129_143052.pdf` instead of `file_a1b2c3d4.pdf`
+
+---
+
 ## [3.1.7] - 2026-01-27
 
 ### Added
-- Welcome files auto-copy during installation (Welcome.txt, Документация.txt)
+- Welcome files auto-copy during installation (Welcome.txt, Documentation-BG.txt)
 - Documentation files in docs/ folder
 
 ### Changed

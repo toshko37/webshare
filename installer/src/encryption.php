@@ -132,7 +132,7 @@ function storeEncryptionPassword($filename, $password, $uploader) {
 
     $keys[$filename] = [
         'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-        'password_plain' => $password, // Temporary: storing plain password for recovery
+        // Note: password_plain removed for security - only hash is stored
         'created_at' => time(),
         'created_by' => $uploader
     ];
@@ -142,12 +142,14 @@ function storeEncryptionPassword($filename, $password, $uploader) {
 
 /**
  * Get stored password for encrypted file
+ * @deprecated Password recovery removed for security - always returns null
  * @param string $filename Encrypted filename
- * @return string|null Password or null if not found
+ * @return null Always returns null
  */
 function getStoredPassword($filename) {
-    $keys = loadEncryptionKeys();
-    return $keys[$filename]['password_plain'] ?? null;
+    // Security fix: plain text password storage removed
+    // Function kept for backwards compatibility, always returns null
+    return null;
 }
 
 /**
@@ -163,13 +165,13 @@ function verifyEncryptionPassword($filename, $password) {
         return false;
     }
 
-    // Check against stored hash
+    // Verify against stored hash only (plain text fallback removed for security)
     if (isset($keys[$filename]['password_hash'])) {
         return password_verify($password, $keys[$filename]['password_hash']);
     }
 
-    // Fallback: check against plain password
-    return ($keys[$filename]['password_plain'] ?? '') === $password;
+    // No hash found - legacy entry without proper hash
+    return false;
 }
 
 /**

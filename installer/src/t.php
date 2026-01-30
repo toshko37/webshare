@@ -35,13 +35,9 @@ if (empty($token)) {
 }
 
 // Helper functions
-function generateToken($length = 6) {
-    $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    $token = '';
-    for ($i = 0; $i < $length; $i++) {
-        $token .= $chars[random_int(0, strlen($chars) - 1)];
-    }
-    return $token;
+function generateToken($length = 32) {
+    // Generate cryptographically secure token (128 bits = 32 hex chars)
+    return bin2hex(random_bytes($length / 2));
 }
 
 function loadMetadata($file) {
@@ -60,11 +56,11 @@ $editKey = $_GET['edit'] ?? '';
 $isViewMode = !empty($token);
 $hasEditAccess = false;
 
-// Validate edit key if provided
+// Validate edit key if provided (12=old format, 32=new secure format)
 if ($isViewMode && !empty($editKey)) {
-    if (preg_match('/^[a-zA-Z0-9]{12}$/', $editKey)) {
+    if (preg_match('/^[a-zA-Z0-9]{12,64}$/', $editKey)) {
         $metadata = loadMetadata($metadataFile);
-        if (isset($metadata[$token]) && isset($metadata[$token]['edit_key']) && $metadata[$token]['edit_key'] === $editKey) {
+        if (isset($metadata[$token]) && isset($metadata[$token]['edit_key']) && hash_equals($metadata[$token]['edit_key'], $editKey)) {
             $hasEditAccess = true;
         }
     }
@@ -187,14 +183,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create'])) {
         exit;
     }
 
-    // Generate unique token
-    $newToken = generateToken(6);
+    // Generate unique token (32 hex chars = 128 bits)
+    $newToken = generateToken(32);
     while (file_exists($textsDir . '.' . $newToken . '.html')) {
-        $newToken = generateToken(6);
+        $newToken = generateToken(32);
     }
-    
-    // Generate edit key
-    $newEditKey = generateToken(12);
+
+    // Generate edit key (32 hex chars = 128 bits)
+    $newEditKey = generateToken(32);
     
     // Save file
     $filePath = $textsDir . '.' . $newToken . '.html';
@@ -534,6 +530,7 @@ if ($isViewMode) {
         </div>
 
         <div class="actions">
+            <button class="btn btn-secondary" onclick="closeOrBack()" title="Close or go back">✕ Затвори</button>
             <button class="btn btn-primary" onclick="copyText()">📋 Copy Text</button>
             <button class="btn btn-secondary" onclick="copyUrl()">🔗 Copy Link</button>
 
@@ -598,6 +595,17 @@ if ($isViewMode) {
             navigator.clipboard.writeText(window.location.href.split('?')[0]).then(() => {
                 showMessage('✅ Link copied to clipboard!');
             });
+        }
+
+        function closeOrBack() {
+            // Try to close if opened as popup, otherwise go back in history
+            if (window.opener) {
+                window.close();
+            } else if (window.history.length > 1) {
+                window.history.back();
+            } else {
+                window.close();
+            }
         }
 
         <?php if ($hasEditAccess): ?>

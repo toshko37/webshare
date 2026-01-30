@@ -3,6 +3,8 @@
 // =================
 // Creates shared text snippets with rich formatting
 
+session_start();
+
 // CONFIGURATION - Easy to change
 define('TEXT_EXPIRE_HOURS', 24); // ← Change expire time here (in hours)
 define('TEXT_MAX_SIZE', 1000000); // 1MB in characters
@@ -12,6 +14,16 @@ require_once __DIR__ . '/html-sanitizer.php';
 
 // Audit logging
 require_once __DIR__ . '/audit-log.php';
+
+// CSRF validation for POST requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $csrfToken = $_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+    if (!hash_equals($_SESSION['csrf_token'] ?? '', $csrfToken)) {
+        header('Content-Type: application/json');
+        http_response_code(403);
+        die(json_encode(['success' => false, 'error' => 'CSRF validation failed']));
+    }
+}
 
 $textsDir = __DIR__ . '/texts/';
 $metadataFile = __DIR__ . '/.texts.json';
@@ -38,14 +50,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create'])) {
         exit;
     }
 
-    // Generate unique token
-    $token = generateToken(6);
+    // Generate unique token (16 bytes = 32 hex chars)
+    $token = generateToken(16);
     while (file_exists($textsDir . '.' . $token . '.html')) {
-        $token = generateToken(6);
+        $token = generateToken(16);
     }
 
-    // Generate edit key
-    $editKey = generateToken(12);
+    // Generate edit key (16 bytes = 32 hex chars)
+    $editKey = generateToken(16);
 
     // Save HTML file
     $filePath = $textsDir . '.' . $token . '.html';
@@ -240,13 +252,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['set_text'])) {
 }
 
 // Helper functions
-function generateToken($length = 6) {
-    $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    $token = '';
-    for ($i = 0; $i < $length; $i++) {
-        $token .= $chars[random_int(0, strlen($chars) - 1)];
-    }
-    return $token;
+// Generate secure token (bytes parameter, returns hex string with 2x length)
+function generateToken($bytes = 8) {
+    return bin2hex(random_bytes($bytes));
 }
 
 function loadMetadata($file) {

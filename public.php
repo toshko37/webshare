@@ -6,6 +6,7 @@
 // Include required files
 require_once __DIR__ . '/audit-log.php';
 require_once __DIR__ . '/encryption.php';
+require_once __DIR__ . '/folder-management.php';
 
 $tokensFile = __DIR__ . '/.tokens.json';
 $filesDir = __DIR__ . '/files/';
@@ -40,10 +41,8 @@ $filename = basename($fileData['filename']);
 
 // Build file path - handle folder paths from tokens
 if (isset($fileData['folder']) && !empty($fileData['folder'])) {
-    // Sanitize folder path (allow subfolders)
-    $folder = preg_replace('/[^a-zA-Z0-9_\-\/]/', '', $fileData['folder']);
-    $folder = preg_replace('/\.\./', '', $folder); // Prevent directory traversal
-    $folder = trim($folder, '/');
+    // Secure folder path sanitization
+    $folder = secureFolderPath($fileData['folder']);
     $filePath = $filesDir . $folder . '/' . $filename;
 } else {
     $filePath = $filesDir . $filename;
@@ -69,7 +68,8 @@ $isEncrypted = isEncryptedFile($filename);
 // Handle encrypted file download
 if ($isEncrypted) {
     // Check if password was provided
-    $password = $_POST['decrypt_password'] ?? $_GET['decrypt_password'] ?? null;
+    // Security: only accept password from POST (not GET - would appear in logs/history)
+    $password = $_POST['decrypt_password'] ?? null;
 
     if (!$password) {
         // Show password form

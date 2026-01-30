@@ -10,6 +10,29 @@ define('PUBLIC_FOLDER', '_public');
 define('MAX_SUBFOLDER_DEPTH', 3); // Maximum folder nesting level
 
 /**
+ * Secure folder path sanitization
+ * Prevents path traversal attacks including ....// bypass attempts
+ * @param string $folder Raw folder path
+ * @return string Sanitized folder path
+ */
+function secureFolderPath($folder) {
+    // First: allow only safe characters
+    $folder = preg_replace('/[^a-zA-Z0-9_\-\/]/', '', $folder);
+
+    // Loop until no changes (handles ....// → ../ → empty)
+    do {
+        $prev = $folder;
+        $folder = str_replace(['..', './'], '', $folder);
+        $folder = preg_replace('#/+#', '/', $folder); // collapse multiple slashes
+    } while ($prev !== $folder);
+
+    // Remove leading/trailing slashes
+    $folder = trim($folder, '/');
+
+    return $folder;
+}
+
+/**
  * Get all available folders for a user
  * @param string $username Current user
  * @return array List of folders the user can access
@@ -166,15 +189,12 @@ function moveFile($filename, $fromFolder, $toFolder, $username) {
 
     // Check if destination exists
     if (file_exists($destPath)) {
-        // Generate unique name
+        // Generate unique name with unique ID to prevent race conditions
         $info = pathinfo($filename);
         $name = $info['filename'];
         $ext = isset($info['extension']) ? '.' . $info['extension'] : '';
-        $counter = 1;
-        while (file_exists(FILES_BASE_DIR . $toFolder . '/' . $name . '_' . $counter . $ext)) {
-            $counter++;
-        }
-        $newFilename = $name . '_' . $counter . $ext;
+        $uniqueId = bin2hex(random_bytes(4));
+        $newFilename = $name . '_' . $uniqueId . $ext;
         $destPath = FILES_BASE_DIR . $toFolder . '/' . $newFilename;
     } else {
         $newFilename = $filename;
@@ -632,16 +652,13 @@ function moveFileToPath($filename, $fromPath, $toPath, $username) {
     $destPath = $destFolder . basename($filename);
     $newFilename = basename($filename);
 
-    // Handle name collision
+    // Handle name collision with unique ID to prevent race conditions
     if (file_exists($destPath)) {
         $info = pathinfo($filename);
         $name = $info['filename'];
         $ext = isset($info['extension']) ? '.' . $info['extension'] : '';
-        $counter = 1;
-        while (file_exists($destFolder . $name . '_' . $counter . $ext)) {
-            $counter++;
-        }
-        $newFilename = $name . '_' . $counter . $ext;
+        $uniqueId = bin2hex(random_bytes(4));
+        $newFilename = $name . '_' . $uniqueId . $ext;
         $destPath = $destFolder . $newFilename;
     }
 

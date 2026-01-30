@@ -2,13 +2,37 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.1.7');
+define('WEBSHARE_VERSION', '3.2.0');
+
+// Security headers
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: SAMEORIGIN');
+header('X-XSS-Protection: 1; mode=block');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+header('Permissions-Policy: geolocation=(), microphone=(), camera=()');
+if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') {
+    header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+}
 
 // Dynamic base URL for installation scripts
 $baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'your-server.com');
 
 // Start session for login tracking
 session_start();
+
+// CSRF Protection - generate token if not exists
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
+// CSRF validation function
+function validateCsrf() {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        return true;
+    }
+    $token = $_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+    return hash_equals($_SESSION['csrf_token'] ?? '', $token);
+}
 
 $maxFileSize = 10 * 1024 * 1024 * 1024; // 10GB in bytes
 
@@ -34,9 +58,8 @@ $userFolders = getUserFolders($currentUser);
 // Get current folder path from query param (supports subfolders like "admin/Projects/2024")
 $currentFolder = $_GET['folder'] ?? $currentUser;
 
-// Sanitize folder path (remove ../ and other dangerous patterns)
-$currentFolder = preg_replace('/\.\./', '', $currentFolder);
-$currentFolder = trim($currentFolder, '/');
+// Sanitize folder path (secure path traversal prevention)
+$currentFolder = secureFolderPath($currentFolder);
 
 // Validate folder access
 if (!canAccessFolderPath($currentUser, $currentFolder)) {
@@ -66,8 +89,10 @@ $canCreateSubfolder = (getFolderDepth($currentFolder) < MAX_SUBFOLDER_DEPTH);
 // Get all subfolders for the current user's base folder (for move modal)
 $allUserSubfolders = getAllSubfoldersRecursive($baseFolder, $currentUser);
 
-// Log login once per session
+// Log login once per session and regenerate session ID (prevent session fixation)
 if (!isset($_SESSION['login_logged']) || $_SESSION['login_logged'] !== $currentUser) {
+    // Regenerate session ID to prevent session fixation attacks
+    session_regenerate_id(true);
     writeAuditLog('login', "User logged in");
     $_SESSION['login_logged'] = $currentUser;
 }
@@ -75,6 +100,12 @@ if (!isset($_SESSION['login_logged']) || $_SESSION['login_logged'] !== $currentU
 // Load general config
 $siteConfigFile = __DIR__ . '/.config.json';
 $siteConfig = file_exists($siteConfigFile) ? json_decode(file_get_contents($siteConfigFile), true) ?: [] : [];
+
+// CSRF validation for all POST requests (except file uploads which use JavaScript)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_FILES['file']) && !validateCsrf()) {
+    http_response_code(403);
+    die('CSRF validation failed. Please refresh the page and try again.');
+}
 
 // Handle speedtest URL save (admin only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_speedtest']) && $isAdmin) {
@@ -104,12 +135,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mail']) && $isAd
     $mailEnabled = isset($_POST['mail_enabled']);
 
     if ($mailEnabled) {
+        // Keep existing password if new one is empty (security: password not shown in form)
+        $newPassword = $_POST['smtp_pass'] ?? '';
+        $existingPassword = $siteConfig['mail']['smtp_pass'] ?? '';
+        $passwordToSave = !empty($newPassword) ? $newPassword : $existingPassword;
+
         $siteConfig['mail'] = [
             'enabled' => true,
             'smtp_host' => trim($_POST['smtp_host'] ?? ''),
             'smtp_port' => (int)($_POST['smtp_port'] ?? 465),
             'smtp_user' => trim($_POST['smtp_user'] ?? ''),
-            'smtp_pass' => $_POST['smtp_pass'] ?? '',
+            'smtp_pass' => $passwordToSave,
             'smtp_encryption' => $_POST['smtp_encryption'] ?? 'ssl',
             'from_name' => trim($_POST['from_name'] ?? 'WebShare')
         ];
@@ -164,7 +200,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_action']) && $is
 // Load geo config for display
 $geoConfig = loadGeoConfig();
 
-// Generate unique filename if file already exists
+// Generate unique filename if file already exists (uses unique ID to prevent race conditions)
 function getUniqueFilename($directory, $filename) {
     if (!file_exists($directory . $filename)) {
         return $filename;
@@ -174,12 +210,9 @@ function getUniqueFilename($directory, $filename) {
     $name = $info['filename'];
     $ext = isset($info['extension']) ? '.' . $info['extension'] : '';
 
-    $counter = 1;
-    while (file_exists($directory . $name . '_' . $counter . $ext)) {
-        $counter++;
-    }
-
-    return $name . '_' . $counter . $ext;
+    // Use unique ID instead of counter to prevent TOCTOU race condition
+    $uniqueId = bin2hex(random_bytes(4)); // 8 hex chars
+    return $name . '_' . $uniqueId . $ext;
 }
 
 // Handle partial file deletion (from Stop button)
@@ -247,21 +280,81 @@ if (isset($_GET['audit_action']) && $isAdmin) {
     exit;
 }
 
-// Handle API key actions
+// Handle API key actions (AJAX)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['api_action'])) {
+    header('Content-Type: application/json');
     $currentUser = getCurrentUser();
     $action = $_POST['api_action'];
 
-    if ($action === 'generate') {
-        $newKey = generateApiKey($currentUser);
-        writeAuditLog('api_key_generate', "Generated new API key", $currentUser);
-    } elseif ($action === 'revoke') {
-        revokeApiKey($currentUser);
-        writeAuditLog('api_key_revoke', "Revoked API key", $currentUser);
+    if (!validateCsrf()) {
+        echo json_encode(['success' => false, 'error' => 'CSRF validation failed']);
+        exit;
     }
 
-    // Redirect to prevent form resubmission
-    header('Location: ' . $_SERVER['REQUEST_URI'] . '#settings-tab');
+    if ($action === 'generate') {
+        $name = trim($_POST['key_name'] ?? '');
+        $ipsRaw = trim($_POST['allowed_ips'] ?? '');
+
+        // Parse IPs (comma or newline separated)
+        $allowedIps = null;
+        if (!empty($ipsRaw)) {
+            $allowedIps = array_filter(array_map('trim', preg_split('/[,\n]+/', $ipsRaw)));
+            // Validate each IP/CIDR
+            foreach ($allowedIps as $ip) {
+                if (!filter_var($ip, FILTER_VALIDATE_IP) && !preg_match('#^[\d.]+/\d+$#', $ip) && !preg_match('#^[a-f\d:]+/\d+$#i', $ip)) {
+                    echo json_encode(['success' => false, 'error' => "Invalid IP/CIDR: $ip"]);
+                    exit;
+                }
+            }
+            $allowedIps = array_values($allowedIps);
+        }
+
+        $result = generateApiKey($currentUser, $name ?: null, $allowedIps ?: null);
+        writeAuditLog('api_key_generate', "Generated API key: {$result['id']}" . ($allowedIps ? " (IP restricted)" : ""), $currentUser);
+        echo json_encode(['success' => true, 'key_id' => $result['id'], 'key' => $result['key']]);
+        exit;
+
+    } elseif ($action === 'revoke') {
+        $keyId = $_POST['key_id'] ?? null;
+        if ($keyId && revokeApiKey($currentUser, $keyId)) {
+            writeAuditLog('api_key_revoke', "Revoked API key: $keyId", $currentUser);
+            echo json_encode(['success' => true]);
+        } else {
+            echo json_encode(['success' => false, 'error' => 'Key not found']);
+        }
+        exit;
+
+    } elseif ($action === 'update_ips') {
+        $keyId = $_POST['key_id'] ?? null;
+        $ipsRaw = trim($_POST['allowed_ips'] ?? '');
+
+        $allowedIps = null;
+        if (!empty($ipsRaw)) {
+            $allowedIps = array_filter(array_map('trim', preg_split('/[,\n]+/', $ipsRaw)));
+            foreach ($allowedIps as $ip) {
+                if (!filter_var($ip, FILTER_VALIDATE_IP) && !preg_match('#^[\d.]+/\d+$#', $ip) && !preg_match('#^[a-f\d:]+/\d+$#i', $ip)) {
+                    echo json_encode(['success' => false, 'error' => "Invalid IP/CIDR: $ip"]);
+                    exit;
+                }
+            }
+            $allowedIps = array_values($allowedIps);
+        }
+
+        if ($keyId && updateApiKeyIps($currentUser, $keyId, $allowedIps ?: null)) {
+            writeAuditLog('api_key_update', "Updated IP restrictions for key: $keyId", $currentUser);
+            echo json_encode(['success' => true]);
+        } else {
+            echo json_encode(['success' => false, 'error' => 'Key not found']);
+        }
+        exit;
+
+    } elseif ($action === 'list') {
+        $keys = getUserApiKeys($currentUser);
+        echo json_encode(['success' => true, 'keys' => $keys]);
+        exit;
+    }
+
+    echo json_encode(['success' => false, 'error' => 'Unknown action']);
     exit;
 }
 
@@ -373,60 +466,85 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['crypt_action'])) {
     exit;
 }
 
+// Dangerous file extensions that should never be uploaded
+$dangerousExtensions = ['php', 'php3', 'php4', 'php5', 'php7', 'phtml', 'phar', 'htaccess', 'htpasswd'];
+
 // Handle file upload
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'])) {
     $file = $_FILES['file'];
 
     if ($file['error'] === UPLOAD_ERR_OK) {
         $originalFilename = basename($file['name']);
-        $filename = getUniqueFilename($uploadDir, $originalFilename);
-        $targetPath = $uploadDir . $filename;
 
-        if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-            $finalFilename = $filename;
-            $wasEncrypted = false;
+        // Security: Check for dangerous file extensions
+        $extension = strtolower(pathinfo($originalFilename, PATHINFO_EXTENSION));
+        if (in_array($extension, $dangerousExtensions)) {
+            $error = "File type not allowed for security reasons: .$extension";
+        }
 
-            // Check if encryption was requested
-            $encryptPassword = $_POST['encrypt_password'] ?? '';
-            if (!empty($encryptPassword)) {
-                // Encrypt the file
-                $encryptResult = encryptFile($targetPath, $targetPath, $encryptPassword);
-
-                if ($encryptResult['success']) {
-                    // Delete original unencrypted file
-                    unlink($targetPath);
-
-                    $finalFilename = $encryptResult['encrypted_filename'];
-                    $wasEncrypted = true;
-
-                    // Store password for recovery
-                    storeEncryptionPassword($finalFilename, $encryptPassword, $currentUser);
-                } else {
-                    // Encryption failed, delete the uploaded file
-                    unlink($targetPath);
-                    $error = "Encryption failed: " . $encryptResult['error'];
+        // Security: Check for double extensions (e.g., file.php.jpg)
+        if (!isset($error)) {
+            $nameParts = explode('.', $originalFilename);
+            if (count($nameParts) > 2) {
+                foreach ($nameParts as $part) {
+                    if (in_array(strtolower($part), $dangerousExtensions)) {
+                        $error = "File contains dangerous extension in name: $part";
+                        break;
+                    }
                 }
             }
+        }
 
-            if (!isset($error)) {
-                // Record file ownership with folder
-                recordFileUpload($finalFilename, $currentUser, $currentFolder);
-                // Audit log
-                $folderDisplay = $currentFolder === '_public' ? 'Public' : $currentFolder;
-                $encryptedNote = $wasEncrypted ? ' [ENCRYPTED]' : '';
-                $filePath = $uploadDir . $finalFilename;
-                writeAuditLog('upload', "File: $finalFilename (" . formatBytes(filesize($filePath)) . ") in folder: $folderDisplay" . $encryptedNote);
+        if (!isset($error)) {
+            $filename = getUniqueFilename($uploadDir, $originalFilename);
+            $targetPath = $uploadDir . $filename;
 
-                if ($wasEncrypted) {
-                    $success = "File uploaded and encrypted: $finalFilename";
-                } elseif ($finalFilename !== $originalFilename) {
-                    $success = "File uploaded as: $finalFilename (original name was taken)";
-                } else {
-                    $success = "File uploaded successfully: $finalFilename";
+            if (move_uploaded_file($file['tmp_name'], $targetPath)) {
+                $finalFilename = $filename;
+                $wasEncrypted = false;
+
+                // Check if encryption was requested
+                $encryptPassword = $_POST['encrypt_password'] ?? '';
+                if (!empty($encryptPassword)) {
+                    // Encrypt the file
+                    $encryptResult = encryptFile($targetPath, $targetPath, $encryptPassword);
+
+                    if ($encryptResult['success']) {
+                        // Delete original unencrypted file
+                        unlink($targetPath);
+
+                        $finalFilename = $encryptResult['encrypted_filename'];
+                        $wasEncrypted = true;
+
+                        // Store password for recovery
+                        storeEncryptionPassword($finalFilename, $encryptPassword, $currentUser);
+                    } else {
+                        // Encryption failed, delete the uploaded file
+                        unlink($targetPath);
+                        $error = "Encryption failed: " . $encryptResult['error'];
+                    }
                 }
+
+                if (!isset($error)) {
+                    // Record file ownership with folder
+                    recordFileUpload($finalFilename, $currentUser, $currentFolder);
+                    // Audit log
+                    $folderDisplay = $currentFolder === '_public' ? 'Public' : $currentFolder;
+                    $encryptedNote = $wasEncrypted ? ' [ENCRYPTED]' : '';
+                    $filePath = $uploadDir . $finalFilename;
+                    writeAuditLog('upload', "File: $finalFilename (" . formatBytes(filesize($filePath)) . ") in folder: $folderDisplay" . $encryptedNote);
+
+                    if ($wasEncrypted) {
+                        $success = "File uploaded and encrypted: $finalFilename";
+                    } elseif ($finalFilename !== $originalFilename) {
+                        $success = "File uploaded as: $finalFilename (original name was taken)";
+                    } else {
+                        $success = "File uploaded successfully: $finalFilename";
+                    }
+                }
+            } else {
+                $error = "Failed to upload file.";
             }
-        } else {
-            $error = "Failed to upload file.";
         }
     } else {
         $errorMessages = [
@@ -530,9 +648,8 @@ if (isset($_POST['move_file']) && isset($_POST['to_folder'])) {
     $filename = basename($_POST['move_file']);
     $toFolder = $_POST['to_folder'];
 
-    // Sanitize destination folder path
-    $toFolder = preg_replace('/\.\./', '', $toFolder);
-    $toFolder = trim($toFolder, '/');
+    // Sanitize destination folder path (secure path traversal prevention)
+    $toFolder = secureFolderPath($toFolder);
 
     header('Content-Type: application/json');
 
@@ -2132,6 +2249,7 @@ function getRecentChanges($limit = 8) {
 
             <div class="upload-section" id="dropZone">
             <form method="POST" enctype="multipart/form-data" id="uploadForm">
+                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                 <div onclick="document.getElementById('fileInput').click()" style="cursor: pointer;">
                     <div style="font-size: 48px; margin-bottom: 10px;">&#128228;</div>
                     <h3>Click to upload or drag and drop</h3>
@@ -2586,40 +2704,121 @@ function getRecentChanges($limit = 8) {
                     </button>
                     <div class="help-accordion-content" id="api-content">
                         <?php
-                        $userApiKey = getUserApiKey($currentUser);
+                        $userApiKeys = getUserApiKeys($currentUser);
+                        $userApiKey = getUserApiKey($currentUser); // First key for backward compat
                         ?>
 
                         <div class="help-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-                            <h4 style="color: white;">🔑 Your API Key</h4>
+                            <h4 style="color: white;">🔑 Your API Keys</h4>
                             <p style="color: rgba(255,255,255,0.8); font-size: 13px; margin-bottom: 15px;">
-                                Use this key to upload files from Windows Explorer or command line.
+                                Manage API keys for uploading files. You can create multiple keys with IP restrictions.
                             </p>
 
-                            <?php if ($userApiKey): ?>
-                            <div style="background: rgba(255,255,255,0.95); padding: 12px; border-radius: 8px; margin-bottom: 15px;">
-                                <code id="apiKeyDisplay" style="word-break: break-all; font-size: 12px; color: #333;"><?= htmlspecialchars($userApiKey) ?></code>
-                                <button class="btn-copy" onclick="copyApiKey()" style="margin-left: 10px; background: #667eea;">Copy</button>
+                            <!-- API Keys List -->
+                            <div id="apiKeysList" style="background: rgba(255,255,255,0.95); border-radius: 8px; margin-bottom: 15px; max-height: 300px; overflow-y: auto;">
+                                <?php if (empty($userApiKeys)): ?>
+                                <div style="padding: 20px; text-align: center; color: #666;">
+                                    No API keys yet. Create one below.
+                                </div>
+                                <?php else: ?>
+                                <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+                                    <thead>
+                                        <tr style="background: #f0f0f0;">
+                                            <th style="padding: 10px; text-align: left;">Name</th>
+                                            <th style="padding: 10px; text-align: left;">Key</th>
+                                            <th style="padding: 10px; text-align: left;">IP Restrictions</th>
+                                            <th style="padding: 10px; text-align: left;">Last Used</th>
+                                            <th style="padding: 10px; text-align: center;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                    <?php foreach ($userApiKeys as $keyInfo): ?>
+                                        <tr style="border-bottom: 1px solid #eee;" data-key-id="<?= htmlspecialchars($keyInfo['id']) ?>">
+                                            <td style="padding: 10px; font-weight: 500;"><?= htmlspecialchars($keyInfo['name']) ?></td>
+                                            <td style="padding: 10px;">
+                                                <code style="background: #e8e8e8; padding: 2px 6px; border-radius: 3px; font-size: 11px;">
+                                                    <?= htmlspecialchars($keyInfo['key_preview']) ?>
+                                                </code>
+                                            </td>
+                                            <td style="padding: 10px;">
+                                                <?php if ($keyInfo['is_allow_all']): ?>
+                                                    <span style="color: #2196f3; font-size: 12px;" title="Allow from any IP">
+                                                        🌍 All IPs
+                                                    </span>
+                                                    <button onclick="editKeyIps('<?= htmlspecialchars($keyInfo['id']) ?>', '0.0.0.0/0')"
+                                                            style="background: none; border: none; cursor: pointer; font-size: 12px;" title="Edit">✏️</button>
+                                                <?php elseif ($keyInfo['is_auto_learn']): ?>
+                                                    <span style="color: #ff9800; font-size: 12px;" title="Will lock to first IP used">
+                                                        🎓 Auto-learn
+                                                    </span>
+                                                    <button onclick="editKeyIps('<?= htmlspecialchars($keyInfo['id']) ?>', '')"
+                                                            style="background: none; border: none; cursor: pointer; font-size: 12px;" title="Set IP manually">✏️</button>
+                                                <?php elseif ($keyInfo['allowed_ips']): ?>
+                                                    <span style="color: #2e7d32; font-size: 12px;" title="<?= htmlspecialchars(implode(', ', $keyInfo['allowed_ips'])) ?>">
+                                                        🔒 <?= count($keyInfo['allowed_ips']) ?> IP<?= $keyInfo['was_learned'] ? ' (learned)' : '' ?>
+                                                    </span>
+                                                    <button onclick="editKeyIps('<?= htmlspecialchars($keyInfo['id']) ?>', '<?= htmlspecialchars(implode(', ', $keyInfo['allowed_ips'])) ?>')"
+                                                            style="background: none; border: none; cursor: pointer; font-size: 12px;" title="Edit IPs">✏️</button>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td style="padding: 10px; font-size: 12px; color: #666;">
+                                                <?= $keyInfo['last_used'] ? date('Y-m-d H:i', $keyInfo['last_used']) : 'Never' ?>
+                                            </td>
+                                            <td style="padding: 10px; text-align: center;">
+                                                <button onclick="revokeKey('<?= htmlspecialchars($keyInfo['id']) ?>', '<?= htmlspecialchars($keyInfo['name']) ?>')"
+                                                        style="background: #f44336; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                                    🗑️
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                                <?php endif; ?>
                             </div>
-                            <?php else: ?>
-                            <div style="background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px; margin-bottom: 15px; color: #666;">
-                                No API key generated yet. Click the button below to create one.
-                            </div>
-                            <?php endif; ?>
 
-                            <form method="POST" style="display: inline;">
-                                <input type="hidden" name="api_action" value="generate">
-                                <button type="submit" class="btn" style="background: <?= $userApiKey ? '#ff9800' : '#4CAF50' ?>; border: none; padding: 8px 16px;">
-                                    <?= $userApiKey ? '🔄 Regenerate Key' : '🔑 Generate API Key' ?>
+                            <!-- Add New Key Form -->
+                            <div style="background: rgba(255,255,255,0.9); padding: 15px; border-radius: 8px;">
+                                <h5 style="margin: 0 0 10px 0; color: #333;">➕ Add New API Key</h5>
+                                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
+                                    <div style="flex: 1; min-width: 150px;">
+                                        <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">Name (optional)</label>
+                                        <input type="text" id="newKeyName" placeholder="e.g., Home PC"
+                                               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                    </div>
+                                    <div style="flex: 2; min-width: 200px;">
+                                        <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">
+                                            Allowed IPs (optional, comma separated)
+                                        </label>
+                                        <input type="text" id="newKeyIps" placeholder="e.g., 192.168.1.0/24, 10.0.0.5"
+                                               style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                                    </div>
+                                    <button onclick="generateNewKey()" class="btn"
+                                            style="background: #4CAF50; border: none; padding: 8px 16px; white-space: nowrap;">
+                                        🔑 Generate Key
+                                    </button>
+                                </div>
+                                <p style="font-size: 11px; color: #888; margin: 8px 0 0 0;">
+                                    💡 Empty = auto-learn (locks to first IP used) | <code>0.0.0.0/0</code> = allow all | CIDR: <code>192.168.1.0/24</code>
+                                </p>
+                            </div>
+                        </div>
+
+                        <!-- New Key Display Modal (hidden by default) -->
+                        <div id="newKeyModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 9999; align-items: center; justify-content: center;">
+                            <div style="background: white; padding: 30px; border-radius: 12px; max-width: 600px; width: 90%; text-align: center;">
+                                <h3 style="color: #4CAF50; margin-bottom: 15px;">✅ API Key Generated!</h3>
+                                <p style="color: #666; margin-bottom: 15px;">Copy this key now - it won't be shown again:</p>
+                                <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 15px; word-break: break-all;">
+                                    <code id="newKeyValue" style="font-size: 14px; color: #333;"></code>
+                                </div>
+                                <button onclick="copyNewKey()" class="btn" style="background: #667eea; border: none; padding: 10px 20px; margin-right: 10px;">
+                                    📋 Copy Key
                                 </button>
-                            </form>
-                            <?php if ($userApiKey): ?>
-                            <form method="POST" style="display: inline; margin-left: 10px;">
-                                <input type="hidden" name="api_action" value="revoke">
-                                <button type="submit" class="btn" style="background: #f44336; border: none; padding: 8px 16px;">
-                                    🗑️ Revoke
+                                <button onclick="closeNewKeyModal()" class="btn" style="background: #6c757d; border: none; padding: 10px 20px;">
+                                    Close
                                 </button>
-                            </form>
-                            <?php endif; ?>
+                            </div>
                         </div>
 
                         <?php if ($userApiKey): ?>
@@ -2652,7 +2851,7 @@ function getRecentChanges($limit = 8) {
                         <div class="help-card">
                             <h4>🖥️ Command Line Usage</h4>
                             <div class="code-block" style="background: #263238;">
-                                <code style="color: #aed581;">curl -X POST -H "X-API-Key: <?= htmlspecialchars($userApiKey) ?>" -F "file=@<span class="code-var">file.pdf</span>" <?= htmlspecialchars((isset($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST']) ?>/api-upload.php</code>
+                                <code style="color: #aed581;">curl -X POST -H "X-API-Key: <span class="code-var">YOUR_KEY</span>" -F "file=@<span class="code-var">file.pdf</span>" <?= htmlspecialchars((isset($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST']) ?>/api-upload.php</code>
                                 <button class="copy-btn" onclick="copyCode(this)">📋</button>
                             </div>
                         </div>
@@ -2684,6 +2883,7 @@ function getRecentChanges($limit = 8) {
                 <h2>⚙️ Settings</h2>
 
                 <form method="POST" class="settings-form">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                     <input type="hidden" name="save_geo" value="1">
 
                     <div class="setting-group">
@@ -2749,6 +2949,7 @@ function getRecentChanges($limit = 8) {
                                     <?php endif; ?>
                                     <?php if (count($users) > 1): ?>
                                         <form method="POST" style="display: inline;" onsubmit="return confirm('Delete user <?= htmlspecialchars($user) ?>?')">
+                                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                                             <input type="hidden" name="user_action" value="delete">
                                             <input type="hidden" name="delete_username" value="<?= htmlspecialchars($user) ?>">
                                             <button type="submit" class="btn-user-delete">✕</button>
@@ -2761,6 +2962,7 @@ function getRecentChanges($limit = 8) {
 
                     <!-- Add New User -->
                     <form method="POST" class="user-form">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                         <input type="hidden" name="user_action" value="add">
                         <div class="setting-row">
                             <label>Add New User:</label>
@@ -2775,6 +2977,7 @@ function getRecentChanges($limit = 8) {
 
                     <!-- Change Password -->
                     <form method="POST" class="user-form">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                         <input type="hidden" name="user_action" value="change_password">
                         <div class="setting-row">
                             <label>Change Password:</label>
@@ -2813,6 +3016,7 @@ function getRecentChanges($limit = 8) {
                     <?php endif; ?>
 
                     <form method="POST">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                         <input type="hidden" name="save_speedtest" value="1">
                         <div class="setting-row">
                             <label><?= empty($currentSpeedtest) ? 'Speed Test URL:' : 'Change URL:' ?></label>
@@ -2834,6 +3038,7 @@ function getRecentChanges($limit = 8) {
                     <p class="setting-desc">Configure SMTP to enable sharing files via email.</p>
 
                     <form method="POST" id="mailSettingsForm">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                         <input type="hidden" name="save_mail" value="1">
 
                         <div class="setting-row">
@@ -2875,7 +3080,10 @@ function getRecentChanges($limit = 8) {
 
                             <div class="setting-row">
                                 <label>SMTP Password:</label>
-                                <input type="password" name="smtp_pass" value="<?= htmlspecialchars($mailConfig['smtp_pass'] ?? '') ?>" placeholder="••••••••">
+                                <input type="password" name="smtp_pass" value="" placeholder="<?= !empty($mailConfig['smtp_pass']) ? '••••••• (saved)' : 'Enter password' ?>">
+                                <?php if (!empty($mailConfig['smtp_pass'])): ?>
+                                <small style="color: #666;">Leave empty to keep current password</small>
+                                <?php endif; ?>
                             </div>
 
                             <div class="setting-row">
@@ -3093,6 +3301,9 @@ systemctl reload apache2</code>
 
     <script src="assets/quill/quill.js"></script>
     <script>
+        // CSRF token for AJAX requests
+        var csrfToken = '<?= htmlspecialchars($_SESSION['csrf_token']) ?>';
+
         // Global variables for audit log
         var currentAuditPage = 1;
         var auditLogLoaded = false;
@@ -3326,12 +3537,10 @@ systemctl reload apache2</code>
             }
         }, false);
 
-        // Show encryption option on file select
+        // Handle file select via click - start upload
         fileInput.addEventListener('change', () => {
             if (fileInput.files.length > 0) {
-                showEncryptOption(true);
-            } else {
-                showEncryptOption(false);
+                addFilesToQueue(fileInput.files);
             }
         });
 
@@ -3508,6 +3717,7 @@ systemctl reload apache2</code>
                 // Delete partially uploaded file
                 if (currentFileName) {
                     const formData = new FormData();
+                    formData.append('csrf_token', csrfToken);
                     formData.append('delete_partial', currentFileName);
 
                     fetch(window.location.href, {
@@ -3883,6 +4093,7 @@ systemctl reload apache2</code>
 
                 const response = await fetch('share.php?action=generate', {
                     method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
                     body: formData
                 });
 
@@ -3914,6 +4125,7 @@ systemctl reload apache2</code>
 
                 const response = await fetch('share.php?action=regenerate', {
                     method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
                     body: formData
                 });
 
@@ -3964,28 +4176,125 @@ systemctl reload apache2</code>
             }
         }
 
+        // API Key Management Functions
+        function generateNewKey() {
+            const name = document.getElementById('newKeyName').value.trim();
+            const ips = document.getElementById('newKeyIps').value.trim();
+
+            const formData = new FormData();
+            formData.append('api_action', 'generate');
+            formData.append('key_name', name);
+            formData.append('allowed_ips', ips);
+            formData.append('csrf_token', csrfToken);
+
+            fetch(window.location.pathname, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Show the new key in modal
+                    document.getElementById('newKeyValue').textContent = data.key;
+                    document.getElementById('newKeyModal').style.display = 'flex';
+                    // Clear form
+                    document.getElementById('newKeyName').value = '';
+                    document.getElementById('newKeyIps').value = '';
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to generate key'));
+                }
+            })
+            .catch(error => {
+                alert('Network error: ' + error.message);
+            });
+        }
+
+        function copyNewKey() {
+            const key = document.getElementById('newKeyValue').textContent;
+            navigator.clipboard.writeText(key).then(() => {
+                alert('Key copied to clipboard!');
+            });
+        }
+
+        function closeNewKeyModal() {
+            document.getElementById('newKeyModal').style.display = 'none';
+            // Reload page to show updated keys list
+            location.reload();
+        }
+
+        function revokeKey(keyId, keyName) {
+            if (!confirm('Are you sure you want to revoke the API key "' + keyName + '"?\n\nThis cannot be undone.')) {
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('api_action', 'revoke');
+            formData.append('key_id', keyId);
+            formData.append('csrf_token', csrfToken);
+
+            fetch(window.location.pathname, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Remove row from table
+                    const row = document.querySelector('tr[data-key-id="' + keyId + '"]');
+                    if (row) row.remove();
+                    // Check if table is empty
+                    const tbody = document.querySelector('#apiKeysList tbody');
+                    if (tbody && tbody.children.length === 0) {
+                        location.reload();
+                    }
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to revoke key'));
+                }
+            })
+            .catch(error => {
+                alert('Network error: ' + error.message);
+            });
+        }
+
+        function editKeyIps(keyId, currentIps) {
+            const newIps = prompt('Enter allowed IPs:\n\n• Empty = Auto-learn (locks to first IP used)\n• 0.0.0.0/0 = Allow from anywhere\n• 192.168.1.100 = Specific IP\n• 192.168.1.0/24 = Subnet (CIDR)\n\nMultiple: comma separated', currentIps);
+
+            if (newIps === null) return; // Cancelled
+
+            const formData = new FormData();
+            formData.append('api_action', 'update_ips');
+            formData.append('key_id', keyId);
+            formData.append('allowed_ips', newIps.trim());
+            formData.append('csrf_token', csrfToken);
+
+            fetch(window.location.pathname, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to update IPs'));
+                }
+            })
+            .catch(error => {
+                alert('Network error: ' + error.message);
+            });
+        }
+
         function copyApiKey() {
             const apiKeyDisplay = document.getElementById('apiKeyDisplay');
+            if (!apiKeyDisplay) return;
             const apiKey = apiKeyDisplay.textContent;
 
-            try {
-                navigator.clipboard.writeText(apiKey).then(() => {
-                    const btn = event.target;
-                    const originalText = btn.textContent;
-                    btn.textContent = 'Copied!';
-                    setTimeout(() => {
-                        btn.textContent = originalText;
-                    }, 2000);
-                });
-            } catch (err) {
-                // Fallback
-                const textarea = document.createElement('textarea');
-                textarea.value = apiKey;
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textarea);
-            }
+            navigator.clipboard.writeText(apiKey).then(() => {
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = originalText, 2000);
+            });
         }
 
         // Email share functions
@@ -4161,7 +4470,7 @@ systemctl reload apache2</code>
                 '</div>';
 
             try {
-                const response = await fetch('live-update.php', { method: 'POST' });
+                const response = await fetch('live-update.php', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } });
                 const result = await response.json();
 
                 if (result.success) {
@@ -4260,6 +4569,7 @@ systemctl reload apache2</code>
 
                 const response = await fetch('send-mail.php', {
                     method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
                     body: formData
                 });
 
@@ -4332,6 +4642,7 @@ systemctl reload apache2</code>
             try {
                 const response = await fetch('send-mail.php?action=test', {
                     method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
                     body: formData
                 });
 
@@ -4362,6 +4673,7 @@ systemctl reload apache2</code>
 
             try {
                 const formData = new FormData();
+                formData.append('csrf_token', csrfToken);
                 formData.append('rename', '1');
                 formData.append('old_name', oldName);
                 formData.append('new_name', newName);
@@ -4384,6 +4696,7 @@ systemctl reload apache2</code>
         async function deleteFile(filename) {
             try {
                 const formData = new FormData();
+                formData.append('csrf_token', csrfToken);
                 formData.append('delete', filename);
 
                 const response = await fetch(window.location.href, {
@@ -4575,6 +4888,7 @@ systemctl reload apache2</code>
 
                 const response = await fetch('text.php', {
                     method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
                     body: formData
                 });
 
@@ -4660,6 +4974,7 @@ systemctl reload apache2</code>
 
                 const response = await fetch('text.php', {
                     method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
                     body: formData
                 });
 
@@ -4683,6 +4998,7 @@ systemctl reload apache2</code>
 
                 const response = await fetch('text.php', {
                     method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
                     body: formData
                 });
 
@@ -4705,6 +5021,7 @@ systemctl reload apache2</code>
 
                 const response = await fetch('text.php', {
                     method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
                     body: formData
                 });
 
@@ -4755,6 +5072,7 @@ systemctl reload apache2</code>
 
             try {
                 const formData = new FormData();
+                formData.append('csrf_token', csrfToken);
                 formData.append('move_file', moveFileName);
                 formData.append('to_folder', selectedMoveFolder);
 
@@ -4917,6 +5235,7 @@ systemctl reload apache2</code>
             // Submit
             try {
                 const formData = new FormData();
+                formData.append('csrf_token', csrfToken);
                 formData.append('crypt_action', action);
                 formData.append('filename', cryptFileName);
                 formData.append('password', password);
@@ -4972,6 +5291,7 @@ systemctl reload apache2</code>
 
             try {
                 const formData = new FormData();
+                formData.append('csrf_token', csrfToken);
                 formData.append('create_subfolder', '1');
                 formData.append('folder_name', folderName);
 
@@ -5000,6 +5320,7 @@ systemctl reload apache2</code>
 
             try {
                 const formData = new FormData();
+                formData.append('csrf_token', csrfToken);
                 formData.append('delete_subfolder', folderPath);
 
                 const response = await fetch(window.location.href, {

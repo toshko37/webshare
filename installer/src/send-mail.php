@@ -5,7 +5,17 @@
  * Sends file share links to specified email addresses
  */
 
+session_start();
 header('Content-Type: application/json');
+
+// CSRF validation for POST requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $csrfToken = $_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+    if (!hash_equals($_SESSION['csrf_token'] ?? '', $csrfToken)) {
+        http_response_code(403);
+        die(json_encode(['success' => false, 'error' => 'CSRF validation failed']));
+    }
+}
 
 // Include required files
 require_once __DIR__ . '/smtp-mailer.php';

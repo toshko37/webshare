@@ -23,13 +23,16 @@ if (!$apiKey) {
     exit;
 }
 
-// Validate API key and get user
-$user = validateApiKey($apiKey);
-if (!$user) {
+// Validate API key and get user (with key details for audit)
+$keyInfo = validateApiKey($apiKey, null, true);
+if (!$keyInfo) {
     http_response_code(403);
-    echo json_encode(['success' => false, 'error' => 'Invalid API key']);
+    echo json_encode(['success' => false, 'error' => 'Invalid API key or IP not allowed']);
     exit;
 }
+$user = $keyInfo['user'];
+$apiKeyId = $keyInfo['key_id'];
+$apiKeyName = $keyInfo['key_name'];
 
 // Check if file was uploaded
 if (!isset($_FILES['file']) || $_FILES['file']['error'] === UPLOAD_ERR_NO_FILE) {
@@ -62,13 +65,29 @@ if (empty($originalName) || $originalName === '.' || $originalName === '..') {
     $originalName = 'uploaded_file_' . time();
 }
 
-// Get optional folder parameter
-$folder = isset($_POST['folder']) ? $_POST['folder'] : null;
-if ($folder) {
-    $folder = preg_replace('/[^a-zA-Z0-9_\-\/]/', '', $folder);
-    $folder = preg_replace('/\.\./', '', $folder);
-    $folder = trim($folder, '/');
+// Security: Block dangerous file extensions
+$dangerousExtensions = ['php', 'php3', 'php4', 'php5', 'php7', 'phtml', 'phar', 'htaccess', 'htpasswd'];
+$extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+if (in_array($extension, $dangerousExtensions)) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'error' => "File type not allowed: .$extension"]);
+    exit;
 }
+
+// Security: Check for double extensions (e.g., file.php.jpg)
+$nameParts = explode('.', $originalName);
+if (count($nameParts) > 2) {
+    foreach ($nameParts as $part) {
+        if (in_array(strtolower($part), $dangerousExtensions)) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => "File contains dangerous extension: $part"]);
+            exit;
+        }
+    }
+}
+
+// Get optional folder parameter (secure sanitization)
+$folder = isset($_POST['folder']) ? secureFolderPath($_POST['folder']) : null;
 
 // Determine upload directory
 $baseDir = __DIR__ . '/files/';
@@ -89,35 +108,86 @@ if (!is_dir($uploadDir)) {
     mkdir($uploadDir, 0755, true);
 }
 
-// Handle duplicate filenames
-$finalName = $originalName;
-$targetPath = $uploadDir . $finalName;
-$counter = 1;
+// Get options
+$overwrite = ($_POST['overwrite'] ?? '0') === '1';
+$encrypt = ($_POST['encrypt'] ?? '0') === '1';
+$encryptPassword = $_POST['encrypt_password'] ?? '';
+
+// Validate encryption options
+if ($encrypt && strlen($encryptPassword) < 4) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'error' => 'Encryption password must be at least 4 characters']);
+    exit;
+}
+
+// Handle filenames
 $pathInfo = pathinfo($originalName);
 $baseName = $pathInfo['filename'];
 $extension = isset($pathInfo['extension']) ? '.' . $pathInfo['extension'] : '';
 
-while (file_exists($targetPath)) {
-    $finalName = $baseName . '_' . $counter . $extension;
-    $targetPath = $uploadDir . $finalName;
-    $counter++;
+$finalName = $originalName;
+$targetPath = $uploadDir . $finalName;
+$wasOverwritten = false;
+
+// Handle existing files
+if (file_exists($targetPath)) {
+    if ($overwrite) {
+        // Delete existing file
+        unlink($targetPath);
+        $wasOverwritten = true;
+    } else {
+        // Add datetime suffix (more readable than random)
+        $timestamp = date('Ymd_His');
+        $finalName = $baseName . '_' . $timestamp . $extension;
+        $targetPath = $uploadDir . $finalName;
+
+        // In rare case of same-second upload, add milliseconds
+        if (file_exists($targetPath)) {
+            $finalName = $baseName . '_' . $timestamp . '_' . substr(microtime(), 2, 3) . $extension;
+            $targetPath = $uploadDir . $finalName;
+        }
+    }
 }
 
 // Move uploaded file
 if (move_uploaded_file($file['tmp_name'], $targetPath)) {
+    $encrypted = false;
+
+    // Encrypt if requested
+    if ($encrypt) {
+        require_once __DIR__ . '/encryption.php';
+        $encryptResult = encryptFile($targetPath, $encryptPassword);
+        if ($encryptResult['success']) {
+            // Update filename to encrypted version
+            $finalName = $encryptResult['filename'];
+            $targetPath = $uploadDir . $finalName;
+            $encrypted = true;
+
+            // Store encryption key for later decryption
+            storeEncryptionPassword($finalName, $encryptPassword, $user);
+        } else {
+            // Encryption failed, but file is uploaded
+            writeAuditLog('api_upload_error', "Encryption failed for $finalName: " . ($encryptResult['error'] ?? 'unknown') . " [key: $apiKeyName ($apiKeyId)]", $user);
+        }
+    }
+
     // Record metadata
-    $metaKey = $folder ? ($folder . '/' . $finalName) : ($user . '/' . $finalName);
     recordFileUpload($finalName, $user, $folder ?: $user);
 
-    // Audit log
+    // Audit log with API key info
     $folderDisplay = $folder ? " to folder: $folder" : '';
-    writeAuditLog('api_upload', "API upload by $user: $finalName$folderDisplay", $user);
+    $encryptDisplay = $encrypted ? ' (encrypted)' : '';
+    $overwriteDisplay = $wasOverwritten ? ' (overwritten)' : '';
+    $keyDisplay = " [key: $apiKeyName ($apiKeyId)]";
+    writeAuditLog('api_upload', "API upload: $finalName$folderDisplay$encryptDisplay$overwriteDisplay$keyDisplay", $user);
 
     echo json_encode([
         'success' => true,
         'filename' => $finalName,
         'originalName' => $originalName,
-        'renamed' => ($finalName !== $originalName),
+        'renamed' => ($finalName !== $originalName && !$encrypted),
+        'overwritten' => $wasOverwritten,
+        'encrypted' => $encrypted,
         'size' => filesize($targetPath),
         'user' => $user,
         'folder' => $folder ?: $user

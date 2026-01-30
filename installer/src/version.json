@@ -1,6 +1,6 @@
 {
-    "version": "3.1.7",
-    "released": "2026-01-27",
-    "changelog": "Documentation files, welcome files auto-copy during setup",
+    "version": "3.2.0",
+    "released": "2026-01-29",
+    "changelog": "Major security update: 14 security fixes, multiple API keys with IP binding, CSRF protection, 32-char tokens, path traversal fix, race condition fix",
     "download_url": "https://webshare.techbg.net/installer/src/"
 }

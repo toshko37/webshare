@@ -12,16 +12,8 @@ if (!isset($_GET['file'])) {
 }
 
 $filename = basename($_GET['file']);
-// Handle folder path - sanitize but don't use basename to preserve subfolders
-$folder = isset($_GET['folder']) ? $_GET['folder'] : null;
-if ($folder) {
-    // Sanitize folder path - allow alphanumeric, underscore, dash, and forward slash
-    $folder = preg_replace('/[^a-zA-Z0-9_\-\/]/', '', $folder);
-    // Remove any .. sequences to prevent directory traversal
-    $folder = preg_replace('/\.\./', '', $folder);
-    // Trim slashes
-    $folder = trim($folder, '/');
-}
+// Handle folder path with secure sanitization
+$folder = isset($_GET['folder']) ? secureFolderPath($_GET['folder']) : null;
 $subpath = isset($_GET['subpath']) ? $_GET['subpath'] : '';
 
 // Get current user
@@ -72,7 +64,8 @@ $isEncrypted = isEncryptedFile($filename);
 // Handle encrypted file download
 if ($isEncrypted) {
     // Check if password was provided
-    $password = $_POST['decrypt_password'] ?? $_GET['decrypt_password'] ?? null;
+    // Security: only accept password from POST (not GET - would appear in logs/history)
+    $password = $_POST['decrypt_password'] ?? null;
 
     if (!$password) {
         // Show password form

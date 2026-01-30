@@ -288,7 +288,7 @@ function syncFilesMeta() {
 }
 
 // ============================================
-// API Key Management
+// API Key Management (Multiple keys + IP binding)
 // ============================================
 
 define('API_KEYS_FILE', __DIR__ . '/.api-keys.json');
@@ -313,59 +313,332 @@ function saveApiKeys($keys) {
 }
 
 /**
- * Generate a new API key for a user
+ * Migrate old format to new format if needed
  */
-function generateApiKey($username) {
-    $keys = loadApiKeys();
-
-    // Generate secure random key (32 bytes = 64 hex chars)
-    $apiKey = bin2hex(random_bytes(32));
-
-    $keys[$username] = [
-        'key' => $apiKey,
-        'created' => time(),
-        'last_used' => null
-    ];
-
-    saveApiKeys($keys);
-    return $apiKey;
+function migrateApiKeysFormat(&$keys) {
+    $migrated = false;
+    foreach ($keys as $username => &$data) {
+        // Old format: { "key": "...", "created": ..., "last_used": ... }
+        // New format: { "keys": [ { "id": "...", "key": "...", ... } ] }
+        if (isset($data['key']) && !isset($data['keys'])) {
+            $data = [
+                'keys' => [
+                    [
+                        'id' => bin2hex(random_bytes(4)),
+                        'key' => $data['key'],
+                        'name' => 'Default',
+                        'created' => $data['created'] ?? time(),
+                        'last_used' => $data['last_used'] ?? null,
+                        'allowed_ips' => null
+                    ]
+                ]
+            ];
+            $migrated = true;
+        }
+    }
+    return $migrated;
 }
 
 /**
- * Get user's API key (or null if not set)
+ * Generate a new API key for a user
+ * @param string $username
+ * @param string $name Optional name/label for the key
+ * @param array|null $allowedIps Optional array of allowed IPs/CIDRs
+ * @return array ['id' => ..., 'key' => ...]
+ */
+function generateApiKey($username, $name = null, $allowedIps = null) {
+    $keys = loadApiKeys();
+    migrateApiKeysFormat($keys);
+
+    // Initialize user if not exists
+    if (!isset($keys[$username])) {
+        $keys[$username] = ['keys' => []];
+    }
+
+    // Generate secure random key (32 bytes = 64 hex chars)
+    $keyId = bin2hex(random_bytes(4));
+    $apiKey = bin2hex(random_bytes(32));
+
+    $newKey = [
+        'id' => $keyId,
+        'key' => $apiKey,
+        'name' => $name ?: 'Key ' . (count($keys[$username]['keys']) + 1),
+        'created' => time(),
+        'last_used' => null,
+        'allowed_ips' => $allowedIps
+    ];
+
+    $keys[$username]['keys'][] = $newKey;
+    saveApiKeys($keys);
+
+    return ['id' => $keyId, 'key' => $apiKey];
+}
+
+/**
+ * Get user's first API key (backward compatibility)
  */
 function getUserApiKey($username) {
     $keys = loadApiKeys();
-    return $keys[$username]['key'] ?? null;
+    migrateApiKeysFormat($keys);
+    return $keys[$username]['keys'][0]['key'] ?? null;
+}
+
+/**
+ * Get all API keys for a user
+ * @return array of key objects (without the actual key value for security)
+ */
+function getUserApiKeys($username) {
+    $keys = loadApiKeys();
+    migrateApiKeysFormat($keys);
+
+    if (!isset($keys[$username]['keys'])) {
+        return [];
+    }
+
+    // Return keys with masked key values for display
+    $result = [];
+    foreach ($keys[$username]['keys'] as $keyData) {
+        $allowedIps = $keyData['allowed_ips'] ?? null;
+        $isAllowAll = is_array($allowedIps) && in_array('0.0.0.0/0', $allowedIps);
+        $isAutoLearn = ($allowedIps === null || empty($allowedIps));
+        $wasLearned = $keyData['learned_ip'] ?? false;
+
+        $result[] = [
+            'id' => $keyData['id'],
+            'name' => $keyData['name'],
+            'key_preview' => substr($keyData['key'], 0, 8) . '...' . substr($keyData['key'], -4),
+            'created' => $keyData['created'],
+            'last_used' => $keyData['last_used'],
+            'allowed_ips' => $allowedIps,
+            'is_allow_all' => $isAllowAll,
+            'is_auto_learn' => $isAutoLearn,
+            'was_learned' => $wasLearned
+        ];
+    }
+    return $result;
+}
+
+/**
+ * Get full API key by ID (for display after generation)
+ */
+function getApiKeyById($username, $keyId) {
+    $keys = loadApiKeys();
+    migrateApiKeysFormat($keys);
+
+    if (!isset($keys[$username]['keys'])) {
+        return null;
+    }
+
+    foreach ($keys[$username]['keys'] as $keyData) {
+        if ($keyData['id'] === $keyId) {
+            return $keyData['key'];
+        }
+    }
+    return null;
+}
+
+/**
+ * Check if IP matches allowed IPs list (supports CIDR notation)
+ * Special values:
+ *   - null/empty array: Auto-learn mode (will be set on first use)
+ *   - ['0.0.0.0/0']: Allow from anywhere
+ */
+function isIpAllowed($ip, $allowedIps) {
+    // Null = auto-learn mode, handled in validateApiKey
+    if ($allowedIps === null || empty($allowedIps)) {
+        return true;
+    }
+
+    foreach ($allowedIps as $allowed) {
+        // 0.0.0.0/0 means allow all
+        if ($allowed === '0.0.0.0/0' || $allowed === '::/0') {
+            return true;
+        }
+
+        if (strpos($allowed, '/') !== false) {
+            // CIDR notation
+            if (ipInCidr($ip, $allowed)) {
+                return true;
+            }
+        } else {
+            // Exact match
+            if ($ip === $allowed) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Check if IP is in CIDR range
+ */
+function ipInCidr($ip, $cidr) {
+    list($subnet, $mask) = explode('/', $cidr);
+
+    // Handle IPv4
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+        $ip = ip2long($ip);
+        $subnet = ip2long($subnet);
+        $mask = -1 << (32 - (int)$mask);
+        return ($ip & $mask) === ($subnet & $mask);
+    }
+
+    // For IPv6, do simple prefix matching
+    if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
+        $ipBin = inet_pton($ip);
+        $subnetBin = inet_pton($subnet);
+        $maskBits = (int)$mask;
+
+        for ($i = 0; $i < $maskBits / 8; $i++) {
+            if ($ipBin[$i] !== $subnetBin[$i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    return false;
 }
 
 /**
  * Validate API key and return username if valid
+ * Also checks IP restrictions and auto-learns IP if not set
+ * @param string $apiKey
+ * @param string|null $clientIp Optional client IP to validate
+ * @param bool $returnDetails If true, returns array with user and key_id
+ * @return string|array|null Username (or array if $returnDetails), null if invalid
  */
-function validateApiKey($apiKey) {
+function validateApiKey($apiKey, $clientIp = null, $returnDetails = false) {
     $keys = loadApiKeys();
+    $migrated = migrateApiKeysFormat($keys);
+
+    if ($clientIp === null) {
+        $clientIp = $_SERVER['REMOTE_ADDR'] ?? null;
+    }
 
     foreach ($keys as $username => $data) {
-        if ($data['key'] === $apiKey) {
-            // Update last used timestamp
-            $keys[$username]['last_used'] = time();
-            saveApiKeys($keys);
-            return $username;
+        if (!isset($data['keys'])) continue;
+
+        foreach ($data['keys'] as $idx => $keyData) {
+            if (hash_equals($keyData['key'], $apiKey)) {
+                $allowedIps = $keyData['allowed_ips'];
+                $keyId = $keyData['id'];
+                $keyName = $keyData['name'];
+
+                // Auto-learn mode: if allowed_ips is null or empty, learn the IP
+                if (($allowedIps === null || empty($allowedIps)) && $clientIp) {
+                    $keys[$username]['keys'][$idx]['allowed_ips'] = [$clientIp];
+                    $keys[$username]['keys'][$idx]['last_used'] = time();
+                    $keys[$username]['keys'][$idx]['learned_ip'] = true;
+                    saveApiKeys($keys);
+
+                    if ($returnDetails) {
+                        return ['user' => $username, 'key_id' => $keyId, 'key_name' => $keyName, 'learned_ip' => $clientIp];
+                    }
+                    return $username;
+                }
+
+                // Check IP restriction (0.0.0.0/0 allows all)
+                if (!isIpAllowed($clientIp, $allowedIps)) {
+                    return null; // IP not allowed
+                }
+
+                // Update last used timestamp
+                $keys[$username]['keys'][$idx]['last_used'] = time();
+                saveApiKeys($keys);
+
+                if ($returnDetails) {
+                    return ['user' => $username, 'key_id' => $keyId, 'key_name' => $keyName];
+                }
+                return $username;
+            }
         }
+    }
+
+    // Save if migrated
+    if ($migrated) {
+        saveApiKeys($keys);
     }
 
     return null;
 }
 
 /**
- * Revoke user's API key
+ * Revoke a specific API key
+ * @param string $username
+ * @param string|null $keyId If null, revokes all keys (backward compat)
  */
-function revokeApiKey($username) {
+function revokeApiKey($username, $keyId = null) {
     $keys = loadApiKeys();
-    if (isset($keys[$username])) {
+    migrateApiKeysFormat($keys);
+
+    if (!isset($keys[$username])) {
+        return false;
+    }
+
+    if ($keyId === null) {
+        // Revoke all keys
         unset($keys[$username]);
         saveApiKeys($keys);
         return true;
     }
+
+    // Revoke specific key
+    foreach ($keys[$username]['keys'] as $idx => $keyData) {
+        if ($keyData['id'] === $keyId) {
+            array_splice($keys[$username]['keys'], $idx, 1);
+            if (empty($keys[$username]['keys'])) {
+                unset($keys[$username]);
+            }
+            saveApiKeys($keys);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Update allowed IPs for a specific key
+ */
+function updateApiKeyIps($username, $keyId, $allowedIps) {
+    $keys = loadApiKeys();
+    migrateApiKeysFormat($keys);
+
+    if (!isset($keys[$username]['keys'])) {
+        return false;
+    }
+
+    foreach ($keys[$username]['keys'] as $idx => &$keyData) {
+        if ($keyData['id'] === $keyId) {
+            $keyData['allowed_ips'] = $allowedIps;
+            saveApiKeys($keys);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Update API key name
+ */
+function updateApiKeyName($username, $keyId, $name) {
+    $keys = loadApiKeys();
+    migrateApiKeysFormat($keys);
+
+    if (!isset($keys[$username]['keys'])) {
+        return false;
+    }
+
+    foreach ($keys[$username]['keys'] as $idx => &$keyData) {
+        if ($keyData['id'] === $keyId) {
+            $keyData['name'] = $name;
+            saveApiKeys($keys);
+            return true;
+        }
+    }
+
     return false;
 }

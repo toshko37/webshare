@@ -20,10 +20,8 @@ require_once __DIR__ . '/audit-log.php';
 $currentUser = getCurrentUser();
 $currentFolder = $_POST['folder'] ?? $currentUser;
 
-// Sanitize folder path
-$currentFolder = preg_replace('/[^a-zA-Z0-9_\-\/]/', '', $currentFolder);
-$currentFolder = preg_replace('/\.\./', '', $currentFolder);
-$currentFolder = trim($currentFolder, '/');
+// Secure folder path sanitization
+$currentFolder = secureFolderPath($currentFolder);
 
 // Set upload directory
 $uploadDir = __DIR__ . '/files/' . $currentFolder . '/';
@@ -87,7 +85,8 @@ curl_setopt_array($ch, [
     CURLOPT_TIMEOUT => 300,
     CURLOPT_CONNECTTIMEOUT => 10,
     CURLOPT_USERAGENT => 'WebShare/1.0',
-    CURLOPT_SSL_VERIFYPEER => false, // Allow self-signed certs
+    CURLOPT_SSL_VERIFYPEER => true,  // Verify SSL certificates
+    CURLOPT_SSL_VERIFYHOST => 2,     // Verify hostname matches certificate
 ]);
 
 if ($action === 'info') {
@@ -154,11 +153,9 @@ if ($action === 'info') {
         $pathInfo = pathinfo($filename);
         $base = $pathInfo['filename'];
         $ext = isset($pathInfo['extension']) ? '.' . $pathInfo['extension'] : '';
-        $counter = 1;
-        while (file_exists($uploadDir . $base . '_' . $counter . $ext)) {
-            $counter++;
-        }
-        $suggestedFilename = $base . '_' . $counter . $ext;
+        // Use unique ID to prevent race conditions
+        $uniqueId = bin2hex(random_bytes(4));
+        $suggestedFilename = $base . '_' . $uniqueId . $ext;
     }
 
     echo json_encode([
@@ -253,15 +250,12 @@ if (file_exists($targetPath)) {
         unlink($targetPath);
         $wasOverwritten = true;
     } else {
-        // Generate unique filename
+        // Generate unique filename with unique ID to prevent race conditions
         $pathInfo = pathinfo($filename);
         $base = $pathInfo['filename'];
         $ext = isset($pathInfo['extension']) ? '.' . $pathInfo['extension'] : '';
-        $counter = 1;
-        while (file_exists($uploadDir . $base . '_' . $counter . $ext)) {
-            $counter++;
-        }
-        $filename = $base . '_' . $counter . $ext;
+        $uniqueId = bin2hex(random_bytes(4));
+        $filename = $base . '_' . $uniqueId . $ext;
         $targetPath = $uploadDir . $filename;
     }
 }
@@ -288,7 +282,8 @@ curl_setopt_array($ch, [
     CURLOPT_TIMEOUT => 600,
     CURLOPT_CONNECTTIMEOUT => 10,
     CURLOPT_USERAGENT => 'WebShare/1.0',
-    CURLOPT_SSL_VERIFYPEER => false,
+    CURLOPT_SSL_VERIFYPEER => true,  // Verify SSL certificates
+    CURLOPT_SSL_VERIFYHOST => 2,     // Verify hostname matches certificate
 ]);
 
 $success = curl_exec($ch);

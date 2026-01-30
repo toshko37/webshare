@@ -19,6 +19,15 @@ session_start();
 header('Content-Type: application/json');
 header('Cache-Control: no-cache');
 
+// CSRF validation for POST requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $csrfToken = $_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+    if (!hash_equals($_SESSION['csrf_token'] ?? '', $csrfToken)) {
+        http_response_code(403);
+        die(json_encode(['success' => false, 'error' => 'CSRF validation failed']));
+    }
+}
+
 // Global error handler to always return JSON
 function jsonError($msg) {
     echo json_encode(['success' => false, 'error' => $msg, 'steps' => []]);

@@ -3,7 +3,17 @@
 // =======================
 // This script handles generation and management of public share links
 
+session_start();
 header('Content-Type: application/json');
+
+// CSRF validation for POST requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $csrfToken = $_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+    if (!hash_equals($_SESSION['csrf_token'] ?? '', $csrfToken)) {
+        http_response_code(403);
+        die(json_encode(['success' => false, 'error' => 'CSRF validation failed']));
+    }
+}
 
 // Include required files
 require_once __DIR__ . '/audit-log.php';
@@ -27,14 +37,10 @@ function saveTokens($tokensFile, $tokens) {
     chmod($tokensFile, 0600); // Make it readable only by owner
 }
 
-// Generate unique token (6 characters: alphanumeric)
+// Generate unique token (16 bytes = 32 hex characters, 128 bits entropy)
+// Old tokens (6 chars) still work for backwards compatibility
 function generateToken() {
-    $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    $token = '';
-    for ($i = 0; $i < 6; $i++) {
-        $token .= $chars[random_int(0, strlen($chars) - 1)];
-    }
-    return $token;
+    return bin2hex(random_bytes(16));
 }
 
 // Handle requests
@@ -54,8 +60,7 @@ switch ($action) {
         // Build file path with folder support
         if ($folder) {
             // Sanitize folder path
-            $folder = preg_replace('/[^a-zA-Z0-9_\-\/]/', '', $folder);
-            $folder = trim($folder, '/');
+            $folder = secureFolderPath($folder);
 
             // Check folder access
             $currentUser = getCurrentUser();
@@ -134,8 +139,7 @@ switch ($action) {
 
         // Build file key with folder support
         if ($folder) {
-            $folder = preg_replace('/[^a-zA-Z0-9_\-\/]/', '', $folder);
-            $folder = trim($folder, '/');
+            $folder = secureFolderPath($folder);
             $fileKey = $folder . '/' . $filename;
         } else {
             $fileKey = $filename;
@@ -199,8 +203,7 @@ switch ($action) {
 
         // Build file key with folder support
         if ($folder) {
-            $folder = preg_replace('/[^a-zA-Z0-9_\-\/]/', '', $folder);
-            $folder = trim($folder, '/');
+            $folder = secureFolderPath($folder);
             $fileKey = $folder . '/' . $filename;
         } else {
             $fileKey = $filename;
@@ -244,8 +247,7 @@ switch ($action) {
 
         // Build file key with folder support
         if ($folder) {
-            $folder = preg_replace('/[^a-zA-Z0-9_\-\/]/', '', $folder);
-            $folder = trim($folder, '/');
+            $folder = secureFolderPath($folder);
             $fileKey = $folder . '/' . $filename;
         } else {
             $fileKey = $filename;

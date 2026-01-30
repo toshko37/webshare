@@ -17,7 +17,8 @@ RewriteRule ^u$ u.php [QSA,L]
 RewriteRule ^u/([a-zA-Z0-9_-]+)$ upload.php?user=$1 [QSA,L]
 
 # Rewrite /t/TOKEN to /t.php?token=TOKEN (for viewing shared texts)
-RewriteRule ^t/([a-zA-Z0-9]{6})$ t.php?token=$1 [QSA,L]
+# Supports 6-64 char tokens (6=old format, 32=new secure format)
+RewriteRule ^t/([a-zA-Z0-9]{6,64})$ t.php?token=$1 [QSA,L]
 
 # Rewrite /t to /t.php (for creating texts)
 RewriteRule ^t$ t.php [QSA,L]
@@ -44,13 +45,18 @@ AuthUserFile /var/www/webshare/.htpasswd
     Require all granted
 </FilesMatch>
 
+# Version info - public (for update checks)
+<FilesMatch "^version\.json$">
+    Require all granted
+</FilesMatch>
+
 # All other PHP files require authentication
 <FilesMatch "^(?!public|p|upload|u|t|get|get-speedtest|get-update|get-update-script|api-upload|api-scripts).*\.php$">
     Require valid-user
 </FilesMatch>
 
-# Non-PHP files that need protection
-<FilesMatch "\.(json|html|htm|txt)$">
+# Non-PHP files that need protection (except version.json)
+<FilesMatch "^(?!version\.json$).*\.(json|html|htm|txt)$">
     Require valid-user
 </FilesMatch>
 
