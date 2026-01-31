@@ -126,7 +126,7 @@ try {
     $result['steps'][] = 'Installing update...';
 
     // Files to update (not user data or config)
-    $updatePatterns = ['*.php', '*.ico', '*.svg', '*.png', '.htaccess', '.user.ini', 'setup.sh', 'update.sh', 'install-local.sh'];
+    $updatePatterns = ['*.php', '*.ico', '*.svg', '*.png', '.htaccess', '.user.ini', 'setup.sh', 'update.sh', 'install-local.sh', 'version.json'];
     $updatedFiles = 0;
 
     foreach ($updatePatterns as $pattern) {

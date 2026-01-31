@@ -17,7 +17,8 @@ RewriteRule ^u$ u.php [QSA,L]
 RewriteRule ^u/([a-zA-Z0-9_-]+)$ upload.php?user=$1 [QSA,L]
 
 # Rewrite /t/TOKEN to /t.php?token=TOKEN (for viewing shared texts)
-RewriteRule ^t/([a-zA-Z0-9]{6})$ t.php?token=$1 [QSA,L]
+# Supports 6-64 char tokens (6=old format, 32=new secure format)
+RewriteRule ^t/([a-zA-Z0-9]{6,64})$ t.php?token=$1 [QSA,L]
 
 # Rewrite /t to /t.php (for creating texts)
 RewriteRule ^t$ t.php [QSA,L]

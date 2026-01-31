@@ -87,14 +87,16 @@ $phpFiles = [
     'p.php',
     'u.php',
     'get.php',
-    'get-speedtest.php'
+    'get-speedtest.php',
+    'security-headers.php'
 ];
 
 $otherFiles = [
     'favicon.ico',
     'favicon.svg',
     'apple-touch-icon.png',
-    'CHANGELOG.md'
+    'CHANGELOG.md',
+    'version.json'
 ];
 
 $installDir = __DIR__;
