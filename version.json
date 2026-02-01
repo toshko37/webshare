@@ -1,6 +1,6 @@
 {
-    "version": "3.4.0",
+    "version": "3.4.1",
     "released": "2026-02-01",
-    "changelog": "Folder Sharing & Chat UI improvements: Share folders with unique links, optional password protection, upload/delete permissions for visitors, download as ZIP, email notifications, Bulgarian chat UI, author color dots",
+    "changelog": "Beta update server option, project origin story in changelog",
     "download_url": "https://webshare.techbg.net/installer/src/"
 }

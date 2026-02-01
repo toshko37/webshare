@@ -8,6 +8,7 @@ texts/
 .audit.json
 .encryption-keys.json
 .files-meta.json
+.folder-shares.json
 .tokens.json
 .texts.json
 .version-check.json

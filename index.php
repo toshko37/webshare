@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.4.0');
+define('WEBSHARE_VERSION', '3.4.1');
 
 // Security headers
 header('X-Content-Type-Options: nosniff');
@@ -277,6 +277,42 @@ if (isset($_GET['audit_action']) && $isAdmin) {
     }
 
     echo json_encode(['success' => false, 'error' => 'Invalid action']);
+    exit;
+}
+
+// Handle update source preference (AJAX)
+if (isset($_GET['action']) && $_GET['action'] === 'get_update_source') {
+    header('Content-Type: application/json');
+    $configFile = __DIR__ . '/.update-config.json';
+    $config = ['stable' => true];
+    if (file_exists($configFile)) {
+        $data = json_decode(file_get_contents($configFile), true);
+        if (isset($data['stable'])) {
+            $config['stable'] = (bool)$data['stable'];
+        }
+    }
+    echo json_encode($config);
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action']) && $_GET['action'] === 'set_update_source') {
+    header('Content-Type: application/json');
+    validateCsrfToken();
+
+    $useBeta = isset($_POST['use_beta']) && $_POST['use_beta'] === '1';
+    $configFile = __DIR__ . '/.update-config.json';
+    $config = ['stable' => !$useBeta];
+
+    if (file_put_contents($configFile, json_encode($config, JSON_PRETTY_PRINT))) {
+        // Clear version cache to force re-check with new source
+        $cacheFile = __DIR__ . '/.version-check.json';
+        if (file_exists($cacheFile)) {
+            unlink($cacheFile);
+        }
+        echo json_encode(['success' => true, 'stable' => $config['stable']]);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'Failed to save config']);
+    }
     exit;
 }
 
@@ -4751,6 +4787,14 @@ systemctl reload apache2</code>
             const autoCheck = localStorage.getItem('webshare_auto_update_check') !== 'false';
             document.getElementById('autoUpdateCheck').checked = autoCheck;
 
+            // Load beta server preference
+            fetch('?action=get_update_source')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('useBetaServer').checked = !data.stable;
+                })
+                .catch(() => {});
+
             if (autoCheck) {
                 // Delay check to not block page load
                 setTimeout(() => checkForUpdates(false), 3000);
@@ -4760,6 +4804,19 @@ systemctl reload apache2</code>
         function toggleAutoUpdateCheck() {
             const checked = document.getElementById('autoUpdateCheck').checked;
             localStorage.setItem('webshare_auto_update_check', checked ? 'true' : 'false');
+        }
+
+        async function toggleBetaServer() {
+            const useBeta = document.getElementById('useBetaServer').checked;
+            try {
+                await fetch('?action=set_update_source', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrfToken },
+                    body: 'use_beta=' + (useBeta ? '1' : '0')
+                });
+            } catch (e) {
+                console.error('Failed to save update source preference');
+            }
         }
 
         // Initialize on page load
@@ -6046,6 +6103,10 @@ systemctl reload apache2</code>
                 <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #666; cursor: pointer;">
                     <input type="checkbox" id="autoUpdateCheck" onchange="toggleAutoUpdateCheck()" checked>
                     Automatically check for updates
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #666; cursor: pointer; margin-top: 8px;">
+                    <input type="checkbox" id="useBetaServer" onchange="toggleBetaServer()">
+                    Use developer server (beta)
                 </label>
             </div>
             <div class="modal-buttons" style="margin-top: 20px;">
