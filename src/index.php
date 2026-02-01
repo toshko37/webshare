@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.5.0');
+define('WEBSHARE_VERSION', '3.5.1');
 
 // Security headers
 header('X-Content-Type-Options: nosniff');
