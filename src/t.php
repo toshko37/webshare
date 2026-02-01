@@ -1704,9 +1704,13 @@ if ($isViewMode) {
             }
         }
 
-        // Go back to text list
+        // Close window or go back to text list
         function goBack() {
-            window.location.href = '/t';
+            window.close();
+            // If window.close() didn't work (not opened by script), redirect
+            setTimeout(() => {
+                window.location.href = '/t';
+            }, 100);
         }
 
         // Send heartbeat
