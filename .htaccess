@@ -3,6 +3,8 @@
 
 # Force UTF-8 encoding for all text files
 AddDefaultCharset UTF-8
+AddCharset UTF-8 .md .txt .json
+AddType "text/plain; charset=utf-8" .md
 
 # URL Rewriting for clean URLs
 RewriteEngine On
