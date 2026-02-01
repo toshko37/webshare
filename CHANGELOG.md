@@ -2,6 +2,74 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.4.0] - 2026-02-01
+
+### Added
+- **Folder Sharing** - Share entire folders with a single link
+  - Anyone with the link can view and download all files in the folder
+  - Subfolders are visible and navigable
+  - Optional password protection for extra security
+  - Optional upload permission (visitors can upload files)
+  - Optional delete permission (visitors can delete files)
+  - Drag & drop upload zone for visitors
+  - File picker button for visitors
+  - "Download All" as .zip archive
+  - Email notifications when visitors upload files
+  - Token regeneration (New ID) to invalidate old links
+  - Share badge (🔗) shows which folders are shared
+  - Full audit logging for all folder share actions
+
+- **Chat improvements**
+  - Bulgarian UI translation (Разговор, Изпрати, etc.)
+  - Color dot preview next to username showing user's color
+  - Default name "Гост" with random session-based color
+  - Visible circular send button with arrow icon
+  - Keyboard hint: "Ctrl+Enter = изпрати"
+  - Email button for chat links (if mail enabled)
+  - New ID button for chat token regeneration
+  - Fixed: New ID now works multiple times without reload
+
+### Technical
+- New URL routes: `/f/{token}`, `/f/{token}/upload`, `/f/{token}/download`
+- New file: `f.php` - folder share handler
+- New storage: `data/folder_shares.json`
+- Audit log actions: folder_share_create, folder_share_update, folder_share_delete, folder_share_regenerate, folder_upload, folder_download, folder_zip_download, folder_delete
+
+---
+
+## [3.3.0] - 2026-01-31
+
+### Added
+- **Chat/Conversation System** - Text sharing transformed into real-time chat platform
+  - Every shared text becomes a conversation anyone with the link can join
+  - Multi-user chat with different usernames
+  - Live viewer count with colored dots (10 second polling)
+  - Real-time message updates (5 second polling)
+  - Message positioning: own messages left, others' right
+  - Author name colors derived from name hash (consistent per user)
+  - Edit/Delete own messages (soft delete)
+  - Expiration countdown timer with extend buttons (+1h, +1d, +1w)
+  - Sound notifications toggle (Web Audio API beep, off by default)
+  - Window flash notifications toggle (title blink, off by default)
+  - Urgent messages (! prefix) - forces notifications even when muted
+  - Automatic migration from old .html format to new .json format
+  - Mobile-responsive chat UI
+
+### Changed
+- "Texts" tab renamed to "Chats" in main interface
+- Shows message count for each conversation
+- Simplified conversation creation with author name input
+- Text data now stored as JSON with messages array
+
+### Technical
+- New API endpoints: messages, post, edit, delete, heartbeat, extend
+- Rate limiting: 30 messages/minute per user
+- Cryptographic user IDs for message ownership
+- File locking for concurrent writes
+- Backward compatible with legacy text format
+
+---
+
 ## [3.2.0] - 2026-01-29
 
 ### Security (14 of 15 issues fixed)
@@ -299,6 +367,8 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.3.0  | 2026-01-31 | Chat/Conversation system - real-time multi-user chat |
+|  3.2.0  | 2026-01-29 | Major security update - 14 vulnerabilities fixed |
 |  3.1.3  | 2026-01-27 | Auto-update system, About redesign, setup.sh |
 |  3.1.2  | 2026-01-25 | Clickable version shows changelog modal |
 |  3.1.1  | 2026-01-25 | API moved to Help tab, permissions fix |

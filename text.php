@@ -107,23 +107,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_text'])) {
     header('Content-Type: application/json');
 
     $token = $_POST['delete_text'];
-    $filePath = $textsDir . '.' . $token . '.html';
+    $htmlPath = $textsDir . '.' . $token . '.html';
+    $jsonPath = $textsDir . '.' . $token . '.json';
 
-    if (file_exists($filePath)) {
-        unlink($filePath);
+    $deleted = false;
+    if (file_exists($htmlPath)) {
+        unlink($htmlPath);
+        $deleted = true;
+    }
+    if (file_exists($jsonPath)) {
+        unlink($jsonPath);
+        $deleted = true;
+    }
 
+    if ($deleted) {
         // Remove from metadata
         $metadata = loadMetadata($metadataFile);
         unset($metadata[$token]);
         saveMetadata($metadataFile, $metadata);
 
         // Audit log
-        writeAuditLog('text_delete', "Deleted text: $token");
+        writeAuditLog('text_delete', "Deleted conversation: $token");
 
         echo json_encode(['success' => true]);
     } else {
-        echo json_encode(['success' => false, 'error' => 'Text not found']);
+        echo json_encode(['success' => false, 'error' => 'Conversation not found']);
     }
+    exit;
+}
+
+// Handle token regeneration (New ID)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['regenerate_token'])) {
+    header('Content-Type: application/json');
+
+    $oldToken = $_POST['regenerate_token'];
+    $metadata = loadMetadata($metadataFile);
+
+    if (!isset($metadata[$oldToken])) {
+        echo json_encode(['success' => false, 'error' => 'Conversation not found']);
+        exit;
+    }
+
+    // Generate new token
+    $newToken = generateToken(16);
+    while (isset($metadata[$newToken])) {
+        $newToken = generateToken(16);
+    }
+
+    // Rename files
+    $oldJsonPath = $textsDir . '.' . $oldToken . '.json';
+    $newJsonPath = $textsDir . '.' . $newToken . '.json';
+    $oldHtmlPath = $textsDir . '.' . $oldToken . '.html';
+    $newHtmlPath = $textsDir . '.' . $newToken . '.html';
+
+    if (file_exists($oldJsonPath)) {
+        rename($oldJsonPath, $newJsonPath);
+    }
+    if (file_exists($oldHtmlPath)) {
+        rename($oldHtmlPath, $newHtmlPath);
+    }
+
+    // Update metadata
+    $metadata[$newToken] = $metadata[$oldToken];
+    unset($metadata[$oldToken]);
+    saveMetadata($metadataFile, $metadata);
+
+    // Audit log
+    writeAuditLog('chat_new_id', "Regenerated token: $oldToken -> $newToken");
+
+    $newUrl = 'https://' . $_SERVER['HTTP_HOST'] . '/t/' . $newToken;
+
+    echo json_encode([
+        'success' => true,
+        'new_token' => $newToken,
+        'new_url' => $newUrl
+    ]);
     exit;
 }
 
@@ -276,10 +334,14 @@ function cleanupExpiredTexts($textsDir, $metadataFile) {
 
     foreach ($metadata as $token => $info) {
         if ($info['expires'] < $now) {
-            // Delete file
-            $filePath = $textsDir . '.' . $token . '.html';
-            if (file_exists($filePath)) {
-                unlink($filePath);
+            // Delete files (both old .html and new .json formats)
+            $htmlPath = $textsDir . '.' . $token . '.html';
+            $jsonPath = $textsDir . '.' . $token . '.json';
+            if (file_exists($htmlPath)) {
+                unlink($htmlPath);
+            }
+            if (file_exists($jsonPath)) {
+                unlink($jsonPath);
             }
 
             // Remove from metadata

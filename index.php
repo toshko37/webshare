@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.2.0');
+define('WEBSHARE_VERSION', '3.4.0');
 
 // Security headers
 header('X-Content-Type-Options: nosniff');
@@ -733,6 +733,152 @@ if (isset($_POST['delete_subfolder'])) {
     exit;
 }
 
+// Folder share file
+define('FOLDER_SHARES_FILE', __DIR__ . '/.folder-shares.json');
+
+function loadFolderShares() {
+    if (file_exists(FOLDER_SHARES_FILE)) {
+        return json_decode(file_get_contents(FOLDER_SHARES_FILE), true) ?: [];
+    }
+    return [];
+}
+
+function saveFolderShares($shares) {
+    file_put_contents(FOLDER_SHARES_FILE, json_encode($shares, JSON_PRETTY_PRINT));
+}
+
+// Handle folder share creation
+if (isset($_POST['create_folder_share'])) {
+    header('Content-Type: application/json');
+
+    $folderPath = $_POST['folder_path'] ?? '';
+    $password = $_POST['share_password'] ?? '';
+    $allowUpload = isset($_POST['allow_upload']) && $_POST['allow_upload'] === '1';
+    $allowDelete = isset($_POST['allow_delete']) && $_POST['allow_delete'] === '1';
+
+    // Security: validate folder access
+    if (!canAccessFolderPath($currentUser, $folderPath)) {
+        echo json_encode(['success' => false, 'error' => 'Access denied']);
+        exit;
+    }
+
+    // Check folder exists
+    $fullPath = __DIR__ . '/files/' . $folderPath;
+    if (!is_dir($fullPath)) {
+        echo json_encode(['success' => false, 'error' => 'Folder not found']);
+        exit;
+    }
+
+    // Generate token
+    $token = bin2hex(random_bytes(16));
+    $shares = loadFolderShares();
+
+    // Check if folder already shared
+    foreach ($shares as $existingToken => $share) {
+        if ($share['folder'] === $folderPath) {
+            // Update existing share
+            $shares[$existingToken]['password'] = $password ? password_hash($password, PASSWORD_DEFAULT) : null;
+            $shares[$existingToken]['allow_upload'] = $allowUpload;
+            $shares[$existingToken]['allow_delete'] = $allowDelete;
+            saveFolderShares($shares);
+
+            writeAuditLog('folder_share_update', "Updated folder share: $folderPath");
+
+            echo json_encode([
+                'success' => true,
+                'token' => $existingToken,
+                'url' => 'https://' . $_SERVER['HTTP_HOST'] . '/f/' . $existingToken,
+                'updated' => true
+            ]);
+            exit;
+        }
+    }
+
+    // Create new share
+    $shares[$token] = [
+        'folder' => $folderPath,
+        'password' => $password ? password_hash($password, PASSWORD_DEFAULT) : null,
+        'allow_upload' => $allowUpload,
+        'allow_delete' => $allowDelete,
+        'created' => time(),
+        'created_by' => $currentUser,
+        'expires' => null,
+        'views' => 0
+    ];
+
+    saveFolderShares($shares);
+    writeAuditLog('folder_share_create', "Created folder share: $folderPath -> $token");
+
+    echo json_encode([
+        'success' => true,
+        'token' => $token,
+        'url' => 'https://' . $_SERVER['HTTP_HOST'] . '/f/' . $token
+    ]);
+    exit;
+}
+
+// Handle folder share deletion
+if (isset($_POST['delete_folder_share'])) {
+    header('Content-Type: application/json');
+
+    $token = $_POST['delete_folder_share'];
+    $shares = loadFolderShares();
+
+    if (!isset($shares[$token])) {
+        echo json_encode(['success' => false, 'error' => 'Share not found']);
+        exit;
+    }
+
+    // Security: only owner or admin can delete
+    if ($shares[$token]['created_by'] !== $currentUser && !$isAdmin) {
+        echo json_encode(['success' => false, 'error' => 'Access denied']);
+        exit;
+    }
+
+    $folderPath = $shares[$token]['folder'];
+    unset($shares[$token]);
+    saveFolderShares($shares);
+
+    writeAuditLog('folder_share_delete', "Deleted folder share: $folderPath");
+
+    echo json_encode(['success' => true]);
+    exit;
+}
+
+// Handle folder share token regeneration
+if (isset($_POST['regenerate_folder_token'])) {
+    header('Content-Type: application/json');
+
+    $oldToken = $_POST['regenerate_folder_token'];
+    $shares = loadFolderShares();
+
+    if (!isset($shares[$oldToken])) {
+        echo json_encode(['success' => false, 'error' => 'Share not found']);
+        exit;
+    }
+
+    // Security: only owner or admin can regenerate
+    if ($shares[$oldToken]['created_by'] !== $currentUser && !$isAdmin) {
+        echo json_encode(['success' => false, 'error' => 'Access denied']);
+        exit;
+    }
+
+    // Generate new token
+    $newToken = bin2hex(random_bytes(16));
+    $shares[$newToken] = $shares[$oldToken];
+    unset($shares[$oldToken]);
+    saveFolderShares($shares);
+
+    writeAuditLog('folder_share_regenerate', "Regenerated folder token: $oldToken -> $newToken");
+
+    echo json_encode([
+        'success' => true,
+        'new_token' => $newToken,
+        'new_url' => 'https://' . $_SERVER['HTTP_HOST'] . '/f/' . $newToken
+    ]);
+    exit;
+}
+
 // Sync file metadata with actual files on disk (once per page load)
 // This handles files added/deleted manually outside the application
 syncFilesMeta();
@@ -767,16 +913,21 @@ usort($files, function($a, $b) {
 $textsMetadataFile = __DIR__ . '/.texts.json';
 $textsDir = __DIR__ . '/texts/';
 
-// Cleanup expired texts
+// Cleanup expired texts/conversations
 if (file_exists($textsMetadataFile)) {
     $textsData = json_decode(file_get_contents($textsMetadataFile), true) ?? [];
     $now = time();
     $changed = false;
     foreach ($textsData as $token => $info) {
         if ($info['expires'] < $now) {
-            $filePath = $textsDir . '.' . $token . '.html';
-            if (file_exists($filePath)) {
-                unlink($filePath);
+            // Delete both old .html and new .json formats
+            $htmlPath = $textsDir . '.' . $token . '.html';
+            $jsonPath = $textsDir . '.' . $token . '.json';
+            if (file_exists($htmlPath)) {
+                unlink($htmlPath);
+            }
+            if (file_exists($jsonPath)) {
+                unlink($jsonPath);
             }
             unset($textsData[$token]);
             $changed = true;
@@ -787,7 +938,7 @@ if (file_exists($textsMetadataFile)) {
     }
 }
 
-// Load texts for display
+// Load conversations for display
 $texts = [];
 if (file_exists($textsMetadataFile)) {
     $textsData = json_decode(file_get_contents($textsMetadataFile), true) ?? [];
@@ -799,7 +950,9 @@ if (file_exists($textsMetadataFile)) {
             'created' => $info['created'],
             'expires' => $info['expires'],
             'views' => $info['views'],
-            'edit_key' => $info['edit_key'] ?? ''
+            'edit_key' => $info['edit_key'] ?? '',
+            'message_count' => $info['message_count'] ?? 1,
+            'creator' => $info['creator'] ?? ''
         ];
     }
 }
@@ -1168,6 +1321,21 @@ function getRecentChanges($limit = 8) {
             color: #333;
             font-weight: 600;
         }
+        .btn-share-current {
+            margin-left: auto;
+            padding: 5px 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-share-current:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }
         /* Subfolders */
         .subfolders-section {
             background: #fafafa;
@@ -1206,15 +1374,23 @@ function getRecentChanges($limit = 8) {
         .subfolder-link:hover {
             color: #2196F3;
         }
-        .btn-delete-folder {
+        .subfolder-actions {
+            display: flex;
+            gap: 5px;
+        }
+        .btn-delete-folder, .btn-share-folder {
             background: none;
             border: none;
             cursor: pointer;
             opacity: 0.5;
             padding: 2px;
         }
-        .btn-delete-folder:hover {
+        .btn-delete-folder:hover, .btn-share-folder:hover {
             opacity: 1;
+        }
+        .shared-badge {
+            font-size: 12px;
+            margin-left: 5px;
         }
         .btn-small {
             padding: 6px 12px;
@@ -2188,7 +2364,7 @@ function getRecentChanges($limit = 8) {
         <!-- Tabs -->
         <div class="tabs">
             <button class="tab active" onclick="switchTab('files')">📁 Files</button>
-            <button class="tab" onclick="switchTab('texts')">📋 Texts</button>
+            <button class="tab" onclick="switchTab('texts')">💬 Chats</button>
             <button class="tab" onclick="switchTab('help')">❓ Help</button>
             <?php if ($isAdmin): ?><button class="tab" onclick="switchTab('settings')">⚙️ Settings</button><?php endif; ?>
             <?php if ($isAdmin): ?><button class="tab" onclick="switchTab('audit')">📊 Audit Log</button><?php endif; ?>
@@ -2209,6 +2385,19 @@ function getRecentChanges($limit = 8) {
 
             <!-- Breadcrumb Navigation -->
             <?php if (count($breadcrumb) > 1): ?>
+            <?php
+                // Check if current folder is shared
+                $currentFolderShares = loadFolderShares();
+                $currentFolderShared = false;
+                $currentFolderToken = null;
+                foreach ($currentFolderShares as $token => $share) {
+                    if ($share['folder'] === $currentFolder) {
+                        $currentFolderShared = true;
+                        $currentFolderToken = $token;
+                        break;
+                    }
+                }
+            ?>
             <div class="breadcrumb">
                 <?php foreach ($breadcrumb as $i => $crumb): ?>
                     <?php if ($i > 0): ?><span class="breadcrumb-sep">/</span><?php endif; ?>
@@ -2216,8 +2405,10 @@ function getRecentChanges($limit = 8) {
                         <a href="?folder=<?= urlencode($crumb['path']) ?>" class="breadcrumb-link"><?= htmlspecialchars($crumb['name']) ?></a>
                     <?php else: ?>
                         <span class="breadcrumb-current"><?= htmlspecialchars($crumb['name']) ?></span>
+                        <?php if ($currentFolderShared): ?><span class="shared-badge">🔗</span><?php endif; ?>
                     <?php endif; ?>
                 <?php endforeach; ?>
+                <button class="btn-share-current" onclick="showFolderShareModal('<?= htmlspecialchars($currentFolder, ENT_QUOTES) ?>', '<?= $currentFolderToken ?>')" title="Сподели тази папка">🔗 Сподели</button>
             </div>
             <?php endif; ?>
 
@@ -2232,12 +2423,28 @@ function getRecentChanges($limit = 8) {
                 </div>
                 <?php if (!empty($subfolders)): ?>
                 <div class="subfolders-list">
-                    <?php foreach ($subfolders as $subfolder): ?>
+                    <?php
+                    $folderShares = loadFolderShares();
+                    foreach ($subfolders as $subfolder):
+                        $isShared = false;
+                        $shareToken = null;
+                        foreach ($folderShares as $token => $share) {
+                            if ($share['folder'] === $subfolder['path']) {
+                                $isShared = true;
+                                $shareToken = $token;
+                                break;
+                            }
+                        }
+                    ?>
                     <div class="subfolder-item">
                         <a href="?folder=<?= urlencode($subfolder['path']) ?>" class="subfolder-link">
                             📁 <?= htmlspecialchars($subfolder['name']) ?>
+                            <?php if ($isShared): ?><span class="shared-badge">🔗</span><?php endif; ?>
                         </a>
-                        <button class="btn-delete-folder" onclick="deleteSubfolder('<?= htmlspecialchars($subfolder['path'], ENT_QUOTES) ?>')" title="Delete folder">🗑️</button>
+                        <div class="subfolder-actions">
+                            <button class="btn-share-folder" onclick="showFolderShareModal('<?= htmlspecialchars($subfolder['path'], ENT_QUOTES) ?>', '<?= $shareToken ?>')" title="Share folder">🔗</button>
+                            <button class="btn-delete-folder" onclick="deleteSubfolder('<?= htmlspecialchars($subfolder['path'], ENT_QUOTES) ?>')" title="Delete folder">🗑️</button>
+                        </div>
                     </div>
                     <?php endforeach; ?>
                 </div>
@@ -2458,10 +2665,16 @@ function getRecentChanges($limit = 8) {
         </div>
         </div><!-- End Files Tab -->
 
-        <!-- Texts Tab -->
+        <!-- Chats Tab -->
         <div class="tab-content" id="texts-tab">
             <div class="upload-section">
-                <h3 style="margin-bottom: 20px;">📝 Share Rich Text</h3>
+                <h3 style="margin-bottom: 20px;">💬 Start New Conversation</h3>
+                <p style="color: #666; margin-bottom: 15px; font-size: 14px;">Create a chat room - anyone with the link can join and reply.</p>
+
+                <div style="margin-bottom: 15px;">
+                    <label style="display: block; margin-bottom: 5px; font-weight: 500; font-size: 14px;">Your Name</label>
+                    <input type="text" id="chat-author-name" placeholder="Your name" maxlength="30" style="padding: 10px 14px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; width: 200px;">
+                </div>
 
                 <div id="editor-container"></div>
 
@@ -2469,28 +2682,23 @@ function getRecentChanges($limit = 8) {
                     <span id="charCount">0</span> / 1,000,000 characters
                 </div>
 
-                <button type="button" class="btn" onclick="shareText()">Share Text</button>
+                <button type="button" class="btn" onclick="shareText()">Start Conversation</button>
 
                 <div class="share-url" id="text-share-result" style="margin-top: 20px;">
                     <div style="margin-bottom: 10px;">
-                        <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 12px;">View URL:</label>
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 12px;">Chat Link (copied to clipboard):</label>
                         <input type="text" readonly id="text-view-url">
                         <button class="btn-copy" onclick="copyTextViewUrl()">Copy</button>
-                    </div>
-                    <div>
-                        <label style="display: block; margin-bottom: 5px; font-weight: bold; font-size: 12px;">Edit URL (save this!):</label>
-                        <input type="text" readonly id="text-edit-url">
-                        <button class="btn-copy" onclick="copyTextEditUrl()">Copy</button>
                     </div>
                 </div>
             </div>
 
             <div class="files-section">
-                <h2>Shared Texts (<?= count($texts) ?>)</h2>
+                <h2>Conversations (<?= count($texts) ?>)</h2>
 
                 <?php if (empty($texts)): ?>
                     <div class="no-files">
-                        <p>No texts shared yet.</p>
+                        <p>No conversations yet.</p>
                     </div>
                 <?php else: ?>
                     <?php foreach ($texts as $text): ?>
@@ -2509,21 +2717,19 @@ function getRecentChanges($limit = 8) {
                                 if ($m > 0 || empty($parts)) $parts[] = $m . 'm';
                             }
                             $expiresText = implode(' ', $parts);
+                            $msgCount = $text['message_count'] ?? 1;
                         ?>
                         <div class="text-item compact">
                             <div class="text-row-top">
                                 <span class="text-preview"><?= htmlspecialchars($text['preview']) ?></span>
                                 <span class="text-actions-inline">
                                     <button class="btn-sm" onclick="shareExistingText('<?= $text['token'] ?>')">Share</button>
-                                    <a href="/t/<?= $text['token'] ?>" target="_blank" class="btn-sm">View</a>
-                                    <?php if (!empty($text['edit_key'])): ?>
-                                    <a href="/t/<?= $text['token'] ?>?edit=<?= $text['edit_key'] ?>" target="_blank" class="btn-sm btn-edit">Edit</a>
-                                    <?php endif; ?>
+                                    <a href="/t/<?= $text['token'] ?>" target="_blank" class="btn-sm">Open</a>
                                     <button class="btn-sm btn-del" onclick="deleteText('<?= $text['token'] ?>')">✕</button>
                                 </span>
                             </div>
                             <div class="text-row-bottom">
-                                <span>📏 <?= formatBytes($text['size']) ?></span>
+                                <span>💬 <?= $msgCount ?></span>
                                 <span>👁️ <?= $text['views'] ?></span>
                                 <span>⏰ <strong id="expires-<?= $text['token'] ?>"><?= $expiresText ?></strong></span>
                                 <span class="extend-btns"><button class="btn-ext" onclick="extendText('<?= $text['token'] ?>', '1d')">+1d</button><button class="btn-ext" onclick="extendText('<?= $text['token'] ?>', '1w')">+1w</button><button class="btn-ext" onclick="extendText('<?= $text['token'] ?>', '1m')">+1m</button><button class="btn-ext" onclick="extendText('<?= $text['token'] ?>', '6m')">+6m</button><button class="btn-ext" onclick="extendText('<?= $text['token'] ?>', 'permanent')">∞</button><button class="btn-set" onclick="setText('<?= $text['token'] ?>', '1h')">1h</button><button class="btn-set" onclick="setText('<?= $text['token'] ?>', '1d')">1d</button></span>
@@ -2531,6 +2737,10 @@ function getRecentChanges($limit = 8) {
                             <div class="share-url" id="share-text-<?= $text['token'] ?>">
                                 <input type="text" readonly id="url-text-<?= $text['token'] ?>" value="https://<?= $_SERVER['HTTP_HOST'] ?>/t/<?= $text['token'] ?>">
                                 <button class="btn-copy" onclick="copyExistingTextLink('<?= $text['token'] ?>')">Copy</button>
+                                <?php if (!empty($siteConfig['mail']['enabled'])): ?>
+                                <button class="btn-copy" style="background: #2196F3;" onclick="emailChatLink('<?= $text['token'] ?>')">Email</button>
+                                <?php endif; ?>
+                                <button class="btn-copy" style="background: #ff9800;" onclick="regenerateChatToken('<?= $text['token'] ?>')">New ID</button>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -2852,6 +3062,28 @@ function getRecentChanges($limit = 8) {
                             <h4>🖥️ Command Line Usage</h4>
                             <div class="code-block" style="background: #263238;">
                                 <code style="color: #aed581;">curl -X POST -H "X-API-Key: <span class="code-var">YOUR_KEY</span>" -F "file=@<span class="code-var">file.pdf</span>" <?= htmlspecialchars((isset($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST']) ?>/api-upload.php</code>
+                                <button class="copy-btn" onclick="copyCode(this)">📋</button>
+                            </div>
+                        </div>
+
+                        <div class="help-card">
+                            <h4>📁 Upload to Specific Folder</h4>
+                            <p style="color: #666; font-size: 13px; margin-bottom: 10px;">
+                                Add <code>folder</code> parameter to upload to a subfolder:
+                            </p>
+                            <div class="code-block" style="background: #263238;">
+                                <code style="color: #aed581;">curl -X POST -H "X-API-Key: <span class="code-var">YOUR_KEY</span>" \<br>&nbsp;&nbsp;-F "file=@<span class="code-var">file.pdf</span>" \<br>&nbsp;&nbsp;-F "folder=<span class="code-var"><?= htmlspecialchars($currentUser) ?>/Projects</span>" \<br>&nbsp;&nbsp;<?= htmlspecialchars((isset($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST']) ?>/api-upload.php</code>
+                                <button class="copy-btn" onclick="copyCode(this)">📋</button>
+                            </div>
+                        </div>
+
+                        <div class="help-card">
+                            <h4>📤 Upload to Shared Folder</h4>
+                            <p style="color: #666; font-size: 13px; margin-bottom: 10px;">
+                                Upload directly to a shared folder (no API key needed, upload must be enabled):
+                            </p>
+                            <div class="code-block" style="background: #263238;">
+                                <code style="color: #aed581;">curl -X POST -F "file=@<span class="code-var">file.pdf</span>" \<br>&nbsp;&nbsp;<?= htmlspecialchars((isset($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST']) ?>/f/<span class="code-var">FOLDER_TOKEN</span>/upload</code>
                                 <button class="copy-btn" onclick="copyCode(this)">📋</button>
                             </div>
                         </div>
@@ -4768,7 +5000,7 @@ systemctl reload apache2</code>
 
             // Add active class to correct button
             document.querySelectorAll('.tab').forEach(btn => {
-                const tabMap = {'files': 'Files', 'texts': 'Texts', 'help': 'Help', 'settings': 'Settings', 'audit': 'Audit'};
+                const tabMap = {'files': 'Files', 'texts': 'Chats', 'help': 'Help', 'settings': 'Settings', 'audit': 'Audit'};
                 if (btn.textContent.includes(tabMap[tabName])) {
                     btn.classList.add('active');
                 }
@@ -4871,6 +5103,8 @@ systemctl reload apache2</code>
 
             const html = quill.root.innerHTML;
             const text = quill.getText().trim();
+            const authorInput = document.getElementById('chat-author-name');
+            const author = authorInput ? authorInput.value.trim() || 'Creator' : 'Creator';
 
             if (text.length === 0) {
                 return;
@@ -4881,14 +5115,19 @@ systemctl reload apache2</code>
                 return;
             }
 
+            // Save author name to localStorage
+            if (authorInput && authorInput.value.trim()) {
+                localStorage.setItem('chat_username', authorInput.value.trim());
+            }
+
             try {
                 const formData = new FormData();
                 formData.append('create', '1');
                 formData.append('html', html);
+                formData.append('author', author);
 
-                const response = await fetch('text.php', {
+                const response = await fetch('/t', {
                     method: 'POST',
-                    headers: { 'X-CSRF-Token': csrfToken },
                     body: formData
                 });
 
@@ -4896,12 +5135,18 @@ systemctl reload apache2</code>
 
                 if (result.success) {
                     const viewUrlInput = document.getElementById('text-view-url');
-                    const editUrlInput = document.getElementById('text-edit-url');
                     const shareResult = document.getElementById('text-share-result');
 
                     viewUrlInput.value = result.view_url || result.url;
-                    editUrlInput.value = result.edit_url;
                     shareResult.style.display = 'block';
+
+                    // Save user ID for this conversation
+                    if (result.user_id && result.token) {
+                        localStorage.setItem('chat_user_id_' + result.token, result.user_id);
+                    }
+
+                    // Copy link to clipboard
+                    navigator.clipboard.writeText(result.view_url || result.url);
 
                     // Clear editor
                     quill.setText('');
@@ -4909,12 +5154,23 @@ systemctl reload apache2</code>
                     // Reload after showing URL
                     setTimeout(() => {
                         window.location.reload();
-                    }, 3000);
+                    }, 2000);
                 }
             } catch (error) {
                 // Silently fail
             }
         }
+
+        // Load saved chat username
+        document.addEventListener('DOMContentLoaded', () => {
+            const authorInput = document.getElementById('chat-author-name');
+            if (authorInput) {
+                const savedName = localStorage.getItem('chat_username');
+                if (savedName) {
+                    authorInput.value = savedName;
+                }
+            }
+        });
 
         // Copy text view URL
         function copyTextViewUrl() {
@@ -5035,6 +5291,79 @@ systemctl reload apache2</code>
             }
         }
 
+        // Email chat link
+        function emailChatLink(token) {
+            const url = document.getElementById('url-text-' + token).value;
+            currentShareUrl = url;
+            currentShareFilename = 'Разговор';
+            document.getElementById('emailModal').classList.add('show');
+        }
+
+        // Regenerate chat token (New ID)
+        async function regenerateChatToken(oldToken) {
+            const btn = event.target;
+            try {
+                btn.disabled = true;
+                btn.textContent = '...';
+
+                const formData = new FormData();
+                formData.append('regenerate_token', oldToken);
+
+                const response = await fetch('text.php', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    const newToken = data.new_token;
+
+                    // Update URL input
+                    const urlInput = document.getElementById('url-text-' + oldToken);
+                    urlInput.value = data.new_url;
+                    urlInput.id = 'url-text-' + newToken;
+
+                    // Update share div ID
+                    const shareDiv = document.getElementById('share-text-' + oldToken);
+                    if (shareDiv) {
+                        shareDiv.id = 'share-text-' + newToken;
+                    }
+
+                    // Update Copy button onclick
+                    const copyBtn = urlInput.nextElementSibling;
+                    if (copyBtn) {
+                        copyBtn.onclick = function() { copyExistingTextLink(newToken); };
+                    }
+
+                    // Update Email button onclick (if exists)
+                    const emailBtn = shareDiv.querySelector('button[style*="2196F3"]');
+                    if (emailBtn) {
+                        emailBtn.onclick = function() { emailChatLink(newToken); };
+                    }
+
+                    // Update New ID button onclick
+                    btn.onclick = function() { regenerateChatToken(newToken); };
+
+                    btn.textContent = 'Done!';
+                    setTimeout(() => {
+                        btn.textContent = 'New ID';
+                        btn.disabled = false;
+                    }, 1500);
+                } else {
+                    btn.textContent = 'Error';
+                    setTimeout(() => {
+                        btn.textContent = 'New ID';
+                        btn.disabled = false;
+                    }, 2000);
+                }
+            } catch (error) {
+                btn.textContent = 'New ID';
+                btn.disabled = false;
+            }
+        }
+
         // ==================
         // Move File Functions
         // ==================
@@ -5056,6 +5385,151 @@ systemctl reload apache2</code>
             document.getElementById('moveModal').classList.remove('show');
             moveFileName = null;
             selectedMoveFolder = null;
+        }
+
+        // ======================
+        // Folder Share Functions
+        // ======================
+        let currentShareFolderPath = null;
+        let currentShareFolderToken = null;
+
+        function showFolderShareModal(folderPath, existingToken) {
+            currentShareFolderPath = folderPath;
+            currentShareFolderToken = existingToken && existingToken !== 'null' ? existingToken : null;
+
+            document.getElementById('shareFolderPath').value = folderPath;
+            document.getElementById('shareFolderToken').value = currentShareFolderToken || '';
+            document.getElementById('shareFolderName').textContent = folderPath.split('/').pop();
+
+            // Reset form
+            document.getElementById('folderShareUpload').checked = false;
+            document.getElementById('folderShareDelete').checked = false;
+            document.getElementById('folderSharePassword').value = '';
+
+            if (currentShareFolderToken) {
+                // Existing share - show URL and management buttons
+                document.getElementById('folderShareUrl').style.display = 'block';
+                document.getElementById('folderShareUrlInput').value = 'https://' + location.host + '/f/' + currentShareFolderToken;
+                document.getElementById('btnDeleteFolderShare').style.display = 'inline-block';
+                document.getElementById('btnRegenerateFolderToken').style.display = 'inline-block';
+                document.getElementById('btnCreateFolderShare').textContent = 'Обнови';
+            } else {
+                // New share
+                document.getElementById('folderShareUrl').style.display = 'none';
+                document.getElementById('btnDeleteFolderShare').style.display = 'none';
+                document.getElementById('btnRegenerateFolderToken').style.display = 'none';
+                document.getElementById('btnCreateFolderShare').textContent = 'Сподели';
+            }
+
+            document.getElementById('folderShareModal').classList.add('show');
+        }
+
+        function closeFolderShareModal() {
+            document.getElementById('folderShareModal').classList.remove('show');
+            currentShareFolderPath = null;
+            currentShareFolderToken = null;
+        }
+
+        async function createFolderShare() {
+            const folderPath = document.getElementById('shareFolderPath').value;
+            const allowUpload = document.getElementById('folderShareUpload').checked;
+            const allowDelete = document.getElementById('folderShareDelete').checked;
+            const password = document.getElementById('folderSharePassword').value;
+
+            const formData = new FormData();
+            formData.append('create_folder_share', '1');
+            formData.append('folder_path', folderPath);
+            formData.append('allow_upload', allowUpload ? '1' : '0');
+            formData.append('allow_delete', allowDelete ? '1' : '0');
+            if (password) formData.append('share_password', password);
+
+            try {
+                const response = await fetch(location.href, {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    currentShareFolderToken = data.token;
+                    document.getElementById('folderShareUrl').style.display = 'block';
+                    document.getElementById('folderShareUrlInput').value = data.url;
+                    document.getElementById('btnDeleteFolderShare').style.display = 'inline-block';
+                    document.getElementById('btnRegenerateFolderToken').style.display = 'inline-block';
+                    document.getElementById('btnCreateFolderShare').textContent = 'Обнови';
+
+                    // Copy to clipboard
+                    navigator.clipboard.writeText(data.url);
+                    alert(data.updated ? 'Споделянето е обновено!' : 'Папката е споделена! Линкът е копиран.');
+
+                    // Reload to update share badges
+                    if (!data.updated) location.reload();
+                } else {
+                    alert('Грешка: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Грешка при споделяне');
+            }
+        }
+
+        function copyFolderShareUrl() {
+            const input = document.getElementById('folderShareUrlInput');
+            input.select();
+            navigator.clipboard.writeText(input.value);
+            alert('Линкът е копиран!');
+        }
+
+        async function deleteFolderShare() {
+            if (!confirm('Сигурен ли си, че искаш да премахнеш споделянето?')) return;
+
+            const formData = new FormData();
+            formData.append('delete_folder_share', currentShareFolderToken);
+
+            try {
+                const response = await fetch(location.href, {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    alert('Споделянето е премахнато');
+                    location.reload();
+                } else {
+                    alert('Грешка: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Грешка при премахване');
+            }
+        }
+
+        async function regenerateFolderToken() {
+            if (!confirm('Това ще генерира нов линк и ще инвалидира стария. Продължи?')) return;
+
+            const formData = new FormData();
+            formData.append('regenerate_folder_token', currentShareFolderToken);
+
+            try {
+                const response = await fetch(location.href, {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
+                    body: formData
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    currentShareFolderToken = data.new_token;
+                    document.getElementById('folderShareUrlInput').value = data.new_url;
+                    navigator.clipboard.writeText(data.new_url);
+                    alert('Новият линк е генериран и копиран!');
+                } else {
+                    alert('Грешка: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Грешка при генериране');
+            }
         }
 
         function selectMoveFolder(folder, element) {
@@ -5402,6 +5876,53 @@ systemctl reload apache2</code>
             <div class="modal-buttons">
                 <button class="btn" style="background: #6c757d;" onclick="closeCreateFolderModal()">Cancel</button>
                 <button class="btn" onclick="createSubfolderSubmit()">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Folder Share Modal -->
+    <div class="modal" id="folderShareModal">
+        <div class="modal-content" style="max-width: 500px;">
+            <h3>🔗 Споделяне на папка</h3>
+            <p style="margin-bottom: 20px; color: #666;">
+                Папка: <strong id="shareFolderName"></strong>
+            </p>
+
+            <input type="hidden" id="shareFolderPath">
+            <input type="hidden" id="shareFolderToken">
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <input type="checkbox" id="folderShareUpload">
+                    <span>📤 Позволи качване на файлове</span>
+                </label>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                    <input type="checkbox" id="folderShareDelete">
+                    <span>🗑️ Позволи изтриване на файлове</span>
+                </label>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 5px;">🔒 Парола (незадължителна):</label>
+                <input type="password" id="folderSharePassword" placeholder="Остави празно за без парола" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+            </div>
+
+            <div id="folderShareUrl" style="display: none; margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 5px;">Линк за споделяне:</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="folderShareUrlInput" readonly style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 6px; background: #f8f9fa;">
+                    <button class="btn" onclick="copyFolderShareUrl()">Copy</button>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
+                <button class="btn" style="background: #6c757d;" onclick="closeFolderShareModal()">Затвори</button>
+                <button class="btn" style="background: #e74c3c; display: none;" id="btnDeleteFolderShare" onclick="deleteFolderShare()">Премахни споделяне</button>
+                <button class="btn" style="background: #ff9800; display: none;" id="btnRegenerateFolderToken" onclick="regenerateFolderToken()">New ID</button>
+                <button class="btn" id="btnCreateFolderShare" onclick="createFolderShare()">Сподели</button>
             </div>
         </div>
     </div>

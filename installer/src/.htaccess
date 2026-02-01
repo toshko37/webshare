@@ -23,6 +23,15 @@ RewriteRule ^t/([a-zA-Z0-9]{6,64})$ t.php?token=$1 [QSA,L]
 # Rewrite /t to /t.php (for creating texts)
 RewriteRule ^t$ t.php [QSA,L]
 
+# Rewrite /f/TOKEN to /f.php?token=TOKEN (for shared folders)
+RewriteRule ^f/([a-zA-Z0-9]{6,64})$ f.php?token=$1 [QSA,L]
+
+# Rewrite /f/TOKEN/upload for folder uploads
+RewriteRule ^f/([a-zA-Z0-9]{6,64})/upload$ f.php?token=$1&action=upload [QSA,L]
+
+# Rewrite /f/TOKEN/download for zip download
+RewriteRule ^f/([a-zA-Z0-9]{6,64})/download$ f.php?token=$1&action=download [QSA,L]
+
 # Rewrite /get to get.php (installer script)
 RewriteRule ^get$ get.php [QSA,L]
 
@@ -41,7 +50,7 @@ AuthName "WebShare - Protected Area"
 AuthUserFile /var/www/webshare/.htpasswd
 
 # Public files - no authentication required (Apache 2.4 syntax)
-<FilesMatch "^(public|p|upload|u|t|get|get-speedtest|get-update|get-update-script|api-upload|api-scripts)\.php$">
+<FilesMatch "^(public|p|upload|u|t|f|get|get-speedtest|get-update|get-update-script|api-upload|api-scripts)\.php$">
     Require all granted
 </FilesMatch>
 
@@ -51,7 +60,7 @@ AuthUserFile /var/www/webshare/.htpasswd
 </FilesMatch>
 
 # All other PHP files require authentication
-<FilesMatch "^(?!public|p|upload|u|t|get|get-speedtest|get-update|get-update-script|api-upload|api-scripts).*\.php$">
+<FilesMatch "^(?!public|p|upload|u|t|f|get|get-speedtest|get-update|get-update-script|api-upload|api-scripts).*\.php$">
     Require valid-user
 </FilesMatch>
 
