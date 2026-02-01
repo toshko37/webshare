@@ -1,6 +1,6 @@
 {
-    "version": "3.2.0",
-    "released": "2026-01-29",
-    "changelog": "Major security update: 14 security fixes, multiple API keys with IP binding, CSRF protection, 32-char tokens, path traversal fix, race condition fix",
+    "version": "3.4.0",
+    "released": "2026-02-01",
+    "changelog": "Folder Sharing & Chat UI improvements: Share folders with unique links, optional password protection, upload/delete permissions for visitors, download as ZIP, email notifications, Bulgarian chat UI, author color dots",
     "download_url": "https://webshare.techbg.net/installer/src/"
 }
