@@ -25,6 +25,7 @@ settings.json
 
 # Backups and archives
 backups/
+releases/
 *.tar.gz
 *.backup
 
@@ -40,6 +41,7 @@ composer.lock
 
 # Local notes
 НАСТРОЙКИ.txt
+CREDENTIALS.txt
 
 # PHP config
 .user.ini
@@ -53,3 +55,7 @@ composer.lock
 # OS
 .DS_Store
 Thumbs.db
+
+# Old backup files
+*.php.backup
+t.php.backup

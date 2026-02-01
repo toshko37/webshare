@@ -2,6 +2,42 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.5.0] - 2026-02-01
+
+### Project Restructuring
+- **New `src/` directory structure** - All source code now lives in `src/` folder
+  - Cleaner project organization
+  - No more file duplication between root and `installer/src/`
+  - Easier maintenance and development
+
+### Update System
+- **Dual update sources** - Choose between stable and development servers
+  - GitHub (stable): `https://raw.githubusercontent.com/toshko37/webshare/main/src/`
+  - Dev server: `https://webshare.techbg.net/src/`
+  - Configure via `--source github|dev` flag or `.update-config.json`
+
+### Intelligent Installer
+- **Existing installation detection** - Automatically detects previous installations
+  - Shows what's already configured (users, SSL, vhost, files)
+  - Interactive menu with options:
+    1. Update software only (preserves everything)
+    2. Fresh install (preserves data)
+    3. Complete reinstall (clean slate)
+    4. Cancel
+- **Component checking** - Shows what's installed and what will be installed
+  - Apache2, PHP, php-maxminddb, php-xml, Certbot, GeoIP database
+
+### Scripts Updated
+- `installer/install.sh` v3.0 - Full rewrite with intelligent detection
+- `installer/update.sh` v3.0 - Dual source support with `--source` flag
+- `installer/get-webshare.sh` v3.0 - Quick installer updated for new structure
+
+### Breaking Changes
+- File paths changed from `/installer/src/` to `/src/`
+- Old installations will need the redirect for backwards compatibility
+
+---
+
 ## [3.4.1] - 2026-02-01
 
 ### Added

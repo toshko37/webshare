@@ -1,130 +1,389 @@
 #!/bin/bash
 #
-# WebShare Installer v2.0
+# WebShare Installer v3.0
 # =======================
-# Инсталира WebShare файлово и текстово споделяне
-# с GeoIP защита и управление на потребители
+# Intelligent installer with existing installation detection
+# Supports GitHub (stable) and dev server sources
 #
-# Използване:
+# Usage:
 #   sudo ./install.sh domain.com [username] [password]
+#   sudo ./install.sh --source dev domain.com
 #
-# Пример:
-#   sudo ./install.sh webshare.example.com admin secretpass123
+# Options:
+#   --source github|dev  - Choose update source (default: github)
+#   --force              - Skip existing installation check
 #
 
 set -e
 
-# Цветове за output
+# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-# Функции за output
+# Output functions
 info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 success() { echo -e "${GREEN}[OK]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
+check_mark() { echo -e "  ${GREEN}[✓]${NC} $1"; }
+cross_mark() { echo -e "  ${RED}[✗]${NC} $1 ${YELLOW}$2${NC}"; }
 
-# Проверка за root
+# Check for root
 if [ "$EUID" -ne 0 ]; then
-    error "Моля стартирайте като root: sudo ./install.sh"
+    error "Please run as root: sudo ./install.sh"
 fi
 
-# Параметри
-DOMAIN=${1:-""}
-AUTH_USER=${2:-"admin"}
-AUTH_PASS=${3:-"$(openssl rand -base64 12)"}
+# Default values
+SOURCE="github"
+FORCE=false
+DOMAIN=""
+AUTH_USER="admin"
+AUTH_PASS=""
 
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --source)
+            SOURCE="$2"
+            shift 2
+            ;;
+        --force)
+            FORCE=true
+            shift
+            ;;
+        -*)
+            error "Unknown option: $1"
+            ;;
+        *)
+            if [ -z "$DOMAIN" ]; then
+                DOMAIN="$1"
+            elif [ -z "$AUTH_USER" ] || [ "$AUTH_USER" = "admin" ]; then
+                AUTH_USER="$1"
+            elif [ -z "$AUTH_PASS" ]; then
+                AUTH_PASS="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+# Validate source
+if [ "$SOURCE" != "github" ] && [ "$SOURCE" != "dev" ]; then
+    error "Invalid source: $SOURCE. Use 'github' or 'dev'"
+fi
+
+# Banner
+echo ""
+echo -e "${CYAN}╦ ╦┌─┐┌┐ ╔═╗┬ ┬┌─┐┬─┐┌─┐${NC}"
+echo -e "${CYAN}║║║├┤ ├┴┐╚═╗├─┤├─┤├┬┘├┤ ${NC}"
+echo -e "${CYAN}╚╩╝└─┘└─┘╚═╝┴ ┴┴ ┴┴└─└─┘${NC}"
+echo ""
+echo -e "${BLUE}Installer v3.0${NC} - Source: ${GREEN}$SOURCE${NC}"
+echo ""
+
+# Check domain
 if [ -z "$DOMAIN" ]; then
-    echo ""
-    echo "=========================================="
-    echo "     WebShare Installer v2.0"
-    echo "=========================================="
-    echo ""
-    echo "Използване:"
+    echo "Usage:"
     echo "  sudo ./install.sh <domain> [username] [password]"
     echo ""
-    echo "Пример:"
+    echo "Options:"
+    echo "  --source github|dev  - Update source (default: github)"
+    echo "  --force              - Skip existing installation check"
+    echo ""
+    echo "Examples:"
     echo "  sudo ./install.sh webshare.example.com"
     echo "  sudo ./install.sh webshare.example.com admin mypass123"
+    echo "  sudo ./install.sh --source dev webshare.example.com"
     echo ""
-    error "Липсва domain параметър!"
+    error "Domain is required!"
 fi
 
 INSTALL_DIR="/var/www/${DOMAIN}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GEOIP_DIR="/usr/share/GeoIP"
 
-echo ""
-echo "=========================================="
-echo "     WebShare Installer v2.0"
-echo "=========================================="
-echo ""
+# ============================================
+# Check for existing installation
+# ============================================
+check_existing_installation() {
+    local has_existing=false
+    local has_htpasswd=false
+    local has_config=false
+    local has_ssl=false
+    local has_vhost=false
+    local ssl_expiry=""
+
+    echo -e "${BLUE}Checking for existing installation...${NC}"
+    echo ""
+
+    # Check for index.php
+    if [ -f "$INSTALL_DIR/index.php" ]; then
+        has_existing=true
+        check_mark "WebShare installation found"
+    fi
+
+    # Check for .htpasswd
+    if [ -f "$INSTALL_DIR/.htpasswd" ]; then
+        has_htpasswd=true
+        local user_count=$(wc -l < "$INSTALL_DIR/.htpasswd")
+        check_mark ".htpasswd - $user_count user(s)"
+    fi
+
+    # Check for .config.json
+    if [ -f "$INSTALL_DIR/.config.json" ]; then
+        has_config=true
+        check_mark ".config.json"
+    fi
+
+    # Check for SSL certificate
+    if [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+        has_ssl=true
+        ssl_expiry=$(openssl x509 -enddate -noout -in "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" 2>/dev/null | cut -d= -f2 || echo "unknown")
+        check_mark "SSL certificate (expires: $ssl_expiry)"
+    fi
+
+    # Check for Apache vhost
+    if [ -f "/etc/apache2/sites-available/${DOMAIN}.conf" ] || [ -f "/etc/apache2/sites-available/webshare.conf" ]; then
+        has_vhost=true
+        check_mark "Apache virtual host"
+    fi
+
+    # Check for user data
+    if [ -d "$INSTALL_DIR/files" ] && [ "$(ls -A $INSTALL_DIR/files 2>/dev/null)" ]; then
+        local file_count=$(find "$INSTALL_DIR/files" -type f | wc -l)
+        check_mark "files/ directory - $file_count file(s)"
+    fi
+
+    if [ -d "$INSTALL_DIR/texts" ] && [ "$(ls -A $INSTALL_DIR/texts 2>/dev/null)" ]; then
+        local text_count=$(find "$INSTALL_DIR/texts" -type f | wc -l)
+        check_mark "texts/ directory - $text_count text(s)"
+    fi
+
+    echo ""
+
+    if [ "$has_existing" = true ]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Show reinstall options
+show_reinstall_menu() {
+    echo -e "${YELLOW}[!] Existing installation detected!${NC}"
+    echo ""
+    echo "What would you like to do?"
+    echo ""
+    echo -e "  ${GREEN}1)${NC} Update software only (recommended)"
+    echo "     - Preserves users, files, texts, and configuration"
+    echo ""
+    echo -e "  ${YELLOW}2)${NC} Fresh install (preserve data)"
+    echo "     - Reinstalls software"
+    echo "     - Preserves files/, texts/, .htpasswd"
+    echo ""
+    echo -e "  ${RED}3)${NC} Complete reinstall"
+    echo "     - Deletes everything and starts fresh"
+    echo "     - WARNING: All data will be lost!"
+    echo ""
+    echo -e "  ${BLUE}4)${NC} Cancel"
+    echo ""
+    read -p "Enter choice [1-4]: " choice
+
+    case $choice in
+        1)
+            echo ""
+            info "Running software update..."
+            run_update
+            exit 0
+            ;;
+        2)
+            echo ""
+            info "Fresh install (preserving data)..."
+            PRESERVE_DATA=true
+            ;;
+        3)
+            echo ""
+            echo -e "${RED}WARNING: This will delete ALL data in $INSTALL_DIR${NC}"
+            read -p "Type 'DELETE' to confirm: " confirm
+            if [ "$confirm" != "DELETE" ]; then
+                echo "Cancelled."
+                exit 0
+            fi
+            info "Complete reinstall..."
+            PRESERVE_DATA=false
+            rm -rf "$INSTALL_DIR"
+            ;;
+        4)
+            echo "Cancelled."
+            exit 0
+            ;;
+        *)
+            error "Invalid choice"
+            ;;
+    esac
+}
+
+# Run update instead of reinstall
+run_update() {
+    if [ -x "$INSTALL_DIR/update.sh" ]; then
+        cd "$INSTALL_DIR"
+        ./update.sh
+    elif [ -f "$SCRIPT_DIR/update.sh" ]; then
+        export INSTALL_DIR
+        bash "$SCRIPT_DIR/update.sh"
+    else
+        error "Update script not found. Please run full installation."
+    fi
+}
+
+# ============================================
+# Check components
+# ============================================
+check_components() {
+    echo -e "${BLUE}Checking system components...${NC}"
+    echo ""
+
+    local needs_install=false
+
+    # Apache2
+    if command -v apache2 &> /dev/null; then
+        check_mark "Apache2 - installed"
+    else
+        cross_mark "Apache2" "- will be installed"
+        needs_install=true
+    fi
+
+    # PHP
+    if command -v php &> /dev/null; then
+        local php_ver=$(php -v 2>/dev/null | head -n1 | cut -d' ' -f2 | cut -d'.' -f1,2)
+        check_mark "PHP $php_ver - installed"
+    else
+        cross_mark "PHP" "- will be installed"
+        needs_install=true
+    fi
+
+    # php-maxminddb
+    if php -m 2>/dev/null | grep -q maxminddb; then
+        check_mark "php-maxminddb - installed"
+    else
+        cross_mark "php-maxminddb" "- will be installed"
+        needs_install=true
+    fi
+
+    # php-xml
+    if php -m 2>/dev/null | grep -q "^xml$"; then
+        check_mark "php-xml - installed"
+    else
+        cross_mark "php-xml" "- will be installed"
+        needs_install=true
+    fi
+
+    # php-curl
+    if php -m 2>/dev/null | grep -q "^curl$"; then
+        check_mark "php-curl - installed"
+    else
+        cross_mark "php-curl" "- will be installed"
+        needs_install=true
+    fi
+
+    # Certbot
+    if command -v certbot &> /dev/null; then
+        check_mark "Certbot - installed"
+    else
+        cross_mark "Certbot" "- will be installed"
+        needs_install=true
+    fi
+
+    # GeoIP database
+    if [ -f "$GEOIP_DIR/GeoLite2-Country.mmdb" ] || [ -f "$INSTALL_DIR/GeoLite2-Country.mmdb" ]; then
+        check_mark "GeoIP database - available"
+    else
+        cross_mark "GeoIP database" "- will be downloaded"
+    fi
+
+    echo ""
+    return 0
+}
+
+# ============================================
+# Main installation flow
+# ============================================
+
+# Check for existing installation (unless --force)
+PRESERVE_DATA=false
+if [ "$FORCE" = false ] && [ -d "$INSTALL_DIR" ]; then
+    if check_existing_installation; then
+        show_reinstall_menu
+    fi
+fi
+
+# Show component status
+check_components
+
+# Generate password if not provided
+if [ -z "$AUTH_PASS" ]; then
+    AUTH_PASS=$(openssl rand -base64 12)
+fi
+
 info "Domain: $DOMAIN"
 info "Install dir: $INSTALL_DIR"
-info "Auth user: $AUTH_USER"
+info "Admin user: $AUTH_USER"
+info "Update source: $SOURCE"
 echo ""
 
 # ============================================
-# 1. Инсталиране на зависимости
+# 1. Install dependencies
 # ============================================
-info "Инсталиране на зависимости..."
+info "Installing dependencies..."
 
 apt-get update -qq
 
 # Apache2
 if ! command -v apache2 &> /dev/null; then
-    info "Инсталиране на Apache2..."
     apt-get install -y apache2
 fi
 success "Apache2 OK"
 
 # PHP
-PHP_VERSION=$(php -v 2>/dev/null | head -n1 | cut -d' ' -f2 | cut -d'.' -f1,2 || echo "")
-if [ -z "$PHP_VERSION" ]; then
-    info "Инсталиране на PHP..."
-    apt-get install -y php php-common php-cli php-fpm php-json php-mbstring
-    PHP_VERSION=$(php -v | head -n1 | cut -d' ' -f2 | cut -d'.' -f1,2)
+if ! command -v php &> /dev/null; then
+    apt-get install -y php php-common php-cli php-fpm php-json php-mbstring libapache2-mod-php
 fi
+PHP_VERSION=$(php -v | head -n1 | cut -d' ' -f2 | cut -d'.' -f1,2)
 success "PHP $PHP_VERSION OK"
 
-# PHP модули (включително MaxMindDB за GeoIP)
-info "Инсталиране на PHP модули..."
-apt-get install -y php-json php-mbstring php-xml php-dom libapache2-mod-php 2>/dev/null || true
+# PHP modules
+apt-get install -y php-json php-mbstring php-xml php-dom php-curl libapache2-mod-php 2>/dev/null || true
 
-# MaxMindDB за GeoIP
+# MaxMindDB for GeoIP
 if ! php -m | grep -q maxminddb; then
-    info "Инсталиране на php-maxminddb за GeoIP..."
     apt-get install -y php${PHP_VERSION}-maxminddb 2>/dev/null || \
     apt-get install -y php-maxminddb 2>/dev/null || \
-    warn "php-maxminddb не може да се инсталира. GeoIP няма да работи."
+    warn "php-maxminddb not available. GeoIP will not work."
 fi
-success "PHP модули OK"
+success "PHP modules OK"
 
-# Certbot за SSL
+# Certbot
 if ! command -v certbot &> /dev/null; then
-    info "Инсталиране на Certbot..."
     apt-get install -y certbot python3-certbot-apache
 fi
 success "Certbot OK"
 
-# Apache модули
-info "Активиране на Apache модули..."
+# Apache modules
 a2enmod rewrite ssl headers 2>/dev/null || true
-success "Apache модули OK"
+success "Apache modules OK"
 
 # ============================================
-# 2. GeoIP база данни
+# 2. GeoIP database
 # ============================================
-info "Настройване на GeoIP..."
+info "Setting up GeoIP..."
 
 mkdir -p "$GEOIP_DIR"
 
 if [ ! -f "$GEOIP_DIR/GeoLite2-Country.mmdb" ]; then
-    info "Изтегляне на GeoLite2-Country.mmdb..."
-    # Опитваме няколко източника
     GEOIP_URL="https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-Country.mmdb"
 
     if command -v wget &> /dev/null; then
@@ -134,51 +393,111 @@ if [ ! -f "$GEOIP_DIR/GeoLite2-Country.mmdb" ]; then
     fi
 
     if [ -f "$GEOIP_DIR/GeoLite2-Country.mmdb" ] && [ -s "$GEOIP_DIR/GeoLite2-Country.mmdb" ]; then
-        success "GeoIP база изтеглена"
+        success "GeoIP database downloaded"
     else
-        warn "GeoIP базата не може да се изтегли. GeoIP няма да работи."
-        warn "Ръчно изтеглете GeoLite2-Country.mmdb в $GEOIP_DIR/"
+        warn "GeoIP database download failed. GeoIP will not work."
     fi
 else
-    success "GeoIP база съществува"
+    success "GeoIP database exists"
 fi
 
 # ============================================
-# 3. Създаване на директории
+# 3. Create directories
 # ============================================
-info "Създаване на директории..."
+info "Creating directories..."
 
 mkdir -p "$INSTALL_DIR"
-mkdir -p "$INSTALL_DIR/files"
-mkdir -p "$INSTALL_DIR/texts"
+
+if [ "$PRESERVE_DATA" = false ]; then
+    mkdir -p "$INSTALL_DIR/files"
+    mkdir -p "$INSTALL_DIR/texts"
+fi
+mkdir -p "$INSTALL_DIR/backups"
 mkdir -p "$INSTALL_DIR/assets/quill"
 
-success "Директории създадени"
+success "Directories created"
 
 # ============================================
-# 4. Копиране на файлове
+# 4. Download/Copy source files
 # ============================================
-info "Копиране на файлове..."
+info "Installing source files..."
 
-# Ако има source файлове в installer директорията
-if [ -d "$SCRIPT_DIR/src" ]; then
-    cp -r "$SCRIPT_DIR/src/"* "$INSTALL_DIR/"
-    cp "$SCRIPT_DIR/src/.htaccess" "$INSTALL_DIR/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/src/.user.ini" "$INSTALL_DIR/" 2>/dev/null || true
-    chmod +x "$INSTALL_DIR/update.sh" 2>/dev/null || true
+# Determine source URL
+if [ "$SOURCE" = "github" ]; then
+    SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/src"
 else
-    error "Липсва src директорията с файловете!"
+    SOURCE_URL="https://webshare.techbg.net/src"
 fi
 
-success "Файлове копирани"
+# List of files to download
+PHP_FILES=(
+    "index.php" "upload.php" "public.php" "download.php"
+    "t.php" "text.php" "share.php" "folder-management.php"
+    "encryption.php" "audit-log.php" "geo-check.php"
+    "user-management.php" "html-sanitizer.php" "smtp-mailer.php"
+    "send-mail.php" "web-download.php" "api-upload.php"
+    "api-scripts.php" "check-version.php" "do-update.php"
+    "live-update.php" "p.php" "u.php" "get.php"
+    "get-speedtest.php" "security-headers.php" "f.php"
+)
+
+OTHER_FILES=(
+    "favicon.ico" "favicon.svg" "apple-touch-icon.png"
+    "CHANGELOG.md" "README.md" "README-BG.md" "version.json"
+)
+
+# Download PHP files
+for file in "${PHP_FILES[@]}"; do
+    echo -n "  $file... "
+    if curl -fsSL "$SOURCE_URL/$file" -o "$INSTALL_DIR/$file" 2>/dev/null; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${YELLOW}skipped${NC}"
+    fi
+done
+
+# Download other files
+for file in "${OTHER_FILES[@]}"; do
+    echo -n "  $file... "
+    if curl -fsSL "$SOURCE_URL/$file" -o "$INSTALL_DIR/$file" 2>/dev/null; then
+        echo -e "${GREEN}OK${NC}"
+    else
+        echo -e "${YELLOW}skipped${NC}"
+    fi
+done
+
+# Download .htaccess
+echo -n "  .htaccess... "
+if curl -fsSL "$SOURCE_URL/.htaccess" -o "$INSTALL_DIR/.htaccess" 2>/dev/null; then
+    echo -e "${GREEN}OK${NC}"
+else
+    echo -e "${YELLOW}skipped${NC}"
+fi
+
+# Download Quill.js assets
+echo -n "  Quill.js editor... "
+mkdir -p "$INSTALL_DIR/assets/quill"
+if curl -fsSL "$SOURCE_URL/assets/quill/quill.js" -o "$INSTALL_DIR/assets/quill/quill.js" 2>/dev/null && \
+   curl -fsSL "$SOURCE_URL/assets/quill/quill.snow.css" -o "$INSTALL_DIR/assets/quill/quill.snow.css" 2>/dev/null; then
+    echo -e "${GREEN}OK${NC}"
+else
+    echo -e "${YELLOW}skipped${NC}"
+fi
+
+# Copy update.sh from installer
+cp "$SCRIPT_DIR/update.sh" "$INSTALL_DIR/update.sh" 2>/dev/null || true
+chmod +x "$INSTALL_DIR/update.sh" 2>/dev/null || true
+
+success "Source files installed"
 
 # ============================================
-# 5. Конфигурационни файлове
+# 5. Configuration files
 # ============================================
-info "Създаване на конфигурационни файлове..."
+info "Creating configuration files..."
 
-# GeoIP конфигурация
-cat > "$INSTALL_DIR/.geo.json" << 'GEOJSON'
+# GeoIP configuration
+if [ ! -f "$INSTALL_DIR/.geo.json" ]; then
+    cat > "$INSTALL_DIR/.geo.json" << 'GEOJSON'
 {
     "enabled": true,
     "allowed_countries": ["BG"],
@@ -186,128 +505,74 @@ cat > "$INSTALL_DIR/.geo.json" << 'GEOJSON'
     "geoip_database": "/usr/share/GeoIP/GeoLite2-Country.mmdb"
 }
 GEOJSON
+fi
 
-# Files metadata
-echo "{}" > "$INSTALL_DIR/.files-meta.json"
+# Update config (determines update source)
+cat > "$INSTALL_DIR/.update-config.json" << UPDATECONF
+{
+    "stable": $([ "$SOURCE" = "github" ] && echo "true" || echo "false")
+}
+UPDATECONF
 
-# Texts metadata
-echo "{}" > "$INSTALL_DIR/.texts.json"
+# Create other config files if they don't exist
+[ -f "$INSTALL_DIR/.files-meta.json" ] || echo "{}" > "$INSTALL_DIR/.files-meta.json"
+[ -f "$INSTALL_DIR/.texts.json" ] || echo "{}" > "$INSTALL_DIR/.texts.json"
+[ -f "$INSTALL_DIR/.tokens.json" ] || echo "{}" > "$INSTALL_DIR/.tokens.json"
+[ -f "$INSTALL_DIR/.audit.json" ] || echo "{}" > "$INSTALL_DIR/.audit.json"
+[ -f "$INSTALL_DIR/.api-keys.json" ] || echo "[]" > "$INSTALL_DIR/.api-keys.json"
+[ -f "$INSTALL_DIR/.config.json" ] || echo '{"mail_enabled":false}' > "$INSTALL_DIR/.config.json"
+[ -f "$INSTALL_DIR/.mail-ratelimit.json" ] || echo "{}" > "$INSTALL_DIR/.mail-ratelimit.json"
 
-# Share tokens
-echo "{}" > "$INSTALL_DIR/.tokens.json"
-
-success "Конфигурации създадени"
-
-# ============================================
-# 6. Актуализиране на .htaccess
-# ============================================
-info "Конфигуриране на .htaccess..."
-
-cat > "$INSTALL_DIR/.htaccess" << 'HTACCESS'
-# Webshare Access Control
-# =======================
-
-# URL Rewriting for clean URLs
-RewriteEngine On
-
-# Rewrite /p to /p.php (preserve query string)
-RewriteRule ^p$ p.php [QSA,L]
-
-# Rewrite /upload to /upload.php
-RewriteRule ^upload$ upload.php [QSA,L]
-
-# Rewrite /u to /u.php
-RewriteRule ^u$ u.php [QSA,L]
-
-# Rewrite /t/TOKEN to /t.php?token=TOKEN (for viewing shared texts)
-RewriteRule ^t/([a-zA-Z0-9]{6})$ t.php?token=$1 [QSA,L]
-
-# Rewrite /t to /t.php (for creating texts)
-RewriteRule ^t$ t.php [QSA,L]
-
-# Set authentication for the directory
-AuthType Basic
-AuthName "WebShare - Protected Area"
-AuthUserFile INSTALL_DIR/.htpasswd
-
-# Public files - no authentication required
-<FilesMatch "^(public|p|upload|u|t)\.php$">
-    Satisfy any
-    Allow from all
-</FilesMatch>
-
-# All other PHP files require authentication
-<FilesMatch "^(?!public|p|upload|u|t).*\.php$">
-    Require valid-user
-</FilesMatch>
-
-# Non-PHP files that need protection
-<FilesMatch "\.(json|html|htm|txt)$">
-    Require valid-user
-</FilesMatch>
-
-# Security Headers
-<IfModule mod_headers.c>
-    Header set X-Frame-Options "SAMEORIGIN"
-    Header set X-Content-Type-Options "nosniff"
-    Header set X-XSS-Protection "1; mode=block"
-</IfModule>
-
-# Disable directory browsing
-Options -Indexes
-
-# Protect .htaccess and .htpasswd
-<FilesMatch "^\.ht">
-    Require all denied
-</FilesMatch>
-
-# PHP Configuration for large uploads
-php_value upload_max_filesize 10G
-php_value post_max_size 10G
-php_value max_execution_time 7200
-php_value max_input_time 7200
-php_value memory_limit 512M
-HTACCESS
-
-# Заместване на пътя
-sed -i "s|INSTALL_DIR|$INSTALL_DIR|g" "$INSTALL_DIR/.htaccess"
-
-success ".htaccess конфигуриран"
+success "Configuration created"
 
 # ============================================
-# 7. Files directory .htaccess
+# 6. Update .htaccess with correct path
 # ============================================
-info "Защита на files директорията..."
+info "Configuring .htaccess..."
+
+if [ -f "$INSTALL_DIR/.htaccess" ]; then
+    sed -i "s|AuthUserFile .*/\.htpasswd|AuthUserFile $INSTALL_DIR/.htpasswd|g" "$INSTALL_DIR/.htaccess"
+fi
+
+success ".htaccess configured"
+
+# ============================================
+# 7. Files directory protection
+# ============================================
+info "Protecting files directory..."
 
 cat > "$INSTALL_DIR/files/.htaccess" << 'FILESHT'
 # Protect uploaded files from direct access
-# Files should only be downloaded through download.php
-
-# Deny all direct access
 Require all denied
 
-# Block PHP execution
 <FilesMatch "\.php$">
     Require all denied
 </FilesMatch>
 FILESHT
 
-success "Files директория защитена"
+cat > "$INSTALL_DIR/texts/.htaccess" << 'TEXTSHT'
+# Protect text files from direct access
+Require all denied
+TEXTSHT
+
+success "Directories protected"
 
 # ============================================
-# 8. Създаване на .htpasswd
+# 8. Create/Update .htpasswd
 # ============================================
-info "Създаване на .htpasswd..."
-
-htpasswd -cb "$INSTALL_DIR/.htpasswd" "$AUTH_USER" "$AUTH_PASS"
-chmod 644 "$INSTALL_DIR/.htpasswd"
-
-success ".htpasswd създаден"
+if [ "$PRESERVE_DATA" = false ] || [ ! -f "$INSTALL_DIR/.htpasswd" ]; then
+    info "Creating .htpasswd..."
+    htpasswd -cb "$INSTALL_DIR/.htpasswd" "$AUTH_USER" "$AUTH_PASS"
+    success ".htpasswd created"
+else
+    info "Preserving existing .htpasswd"
+    success ".htpasswd preserved"
+fi
 
 # ============================================
 # 9. PHP user.ini
 # ============================================
-info "Конфигуриране на PHP..."
+info "Configuring PHP..."
 
 cat > "$INSTALL_DIR/.user.ini" << 'PHPINI'
 ; WebShare PHP Settings
@@ -318,40 +583,40 @@ max_input_time = 7200
 memory_limit = 512M
 PHPINI
 
-success "PHP конфигуриран"
+success "PHP configured"
 
 # ============================================
-# 10. Права на достъп
+# 10. Permissions
 # ============================================
-info "Настройване на права..."
+info "Setting permissions..."
 
 chown -R www-data:www-data "$INSTALL_DIR"
 chmod -R 755 "$INSTALL_DIR"
 chmod 750 "$INSTALL_DIR/files"
 chmod 750 "$INSTALL_DIR/texts"
-chmod 644 "$INSTALL_DIR/.htpasswd"
+chmod 600 "$INSTALL_DIR/.htpasswd" 2>/dev/null || true
+chmod 600 "$INSTALL_DIR/.api-keys.json" 2>/dev/null || true
+chmod 600 "$INSTALL_DIR/.tokens.json" 2>/dev/null || true
 chmod 644 "$INSTALL_DIR/.geo.json"
 chmod 644 "$INSTALL_DIR/.files-meta.json"
 chmod 644 "$INSTALL_DIR/.texts.json"
-chmod 644 "$INSTALL_DIR/.tokens.json"
-chmod 644 "$INSTALL_DIR/files/.htaccess"
 
-success "Права настроени"
+success "Permissions set"
 
 # ============================================
 # 11. Apache Virtual Host
 # ============================================
-info "Създаване на Apache Virtual Host..."
+info "Creating Apache Virtual Host..."
 
 cat > "/etc/apache2/sites-available/${DOMAIN}.conf" << VHOST
 # HTTP to HTTPS redirect
 <VirtualHost *:80>
     ServerName ${DOMAIN}
-    ServerAlias ${DOMAIN}
+    ServerAlias www.${DOMAIN}
 
     RewriteEngine On
     RewriteCond %{HTTPS} off
-    RewriteRule ^(.*)$ https://%{HTTP_HOST}\$1 [R=301,L]
+    RewriteRule ^(.*)\$ https://%{HTTP_HOST}\$1 [R=301,L]
 
     ErrorLog \${APACHE_LOG_DIR}/error-${DOMAIN}.log
     CustomLog \${APACHE_LOG_DIR}/access-${DOMAIN}.log combined
@@ -362,25 +627,21 @@ cat > "/etc/apache2/sites-available/${DOMAIN}.conf" << VHOST
     <VirtualHost _default_:443>
         ServerAdmin webmaster@${DOMAIN}
         ServerName ${DOMAIN}
-        ServerAlias ${DOMAIN}
+        ServerAlias www.${DOMAIN}
 
         DocumentRoot ${INSTALL_DIR}
 
-        # Directory permissions (authentication handled in .htaccess)
         <Directory ${INSTALL_DIR}/>
             Options -Indexes +FollowSymLinks
             AllowOverride All
             Require all granted
         </Directory>
 
-        # SSL Configuration
         SSLEngine on
 
-        # Logging
         ErrorLog \${APACHE_LOG_DIR}/error-${DOMAIN}-ssl.log
         CustomLog \${APACHE_LOG_DIR}/access-${DOMAIN}-ssl.log combined
 
-        # Security headers
         <IfModule mod_headers.c>
             Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
             Header always set X-Frame-Options "SAMEORIGIN"
@@ -393,86 +654,79 @@ VHOST
 
 a2ensite "${DOMAIN}.conf" 2>/dev/null || true
 
-success "Virtual Host създаден"
+success "Virtual Host created"
 
 # ============================================
-# 12. SSL сертификат
+# 12. SSL Certificate
 # ============================================
-info "Генериране на SSL сертификат..."
+info "Setting up SSL certificate..."
 
-# Рестарт на Apache за да работи HTTP
 systemctl reload apache2 2>/dev/null || true
 
-# Проверка дали домейнът сочи към този сървър
 if host "$DOMAIN" &>/dev/null; then
     certbot --apache -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email --redirect 2>/dev/null || {
-        warn "SSL сертификатът не може да бъде генериран автоматично."
-        warn "Ръчно изпълнете: certbot --apache -d $DOMAIN"
+        warn "SSL certificate could not be generated automatically."
+        warn "Run manually: certbot --apache -d $DOMAIN"
     }
 else
-    warn "Домейнът $DOMAIN не е намерен в DNS."
-    warn "Конфигурирайте DNS записа и после изпълнете:"
-    warn "  certbot --apache -d $DOMAIN"
+    warn "Domain $DOMAIN not found in DNS."
+    warn "Configure DNS and run: certbot --apache -d $DOMAIN"
 fi
 
-success "SSL конфигуриран"
+success "SSL configured"
 
 # ============================================
-# 13. Настройка на автоматично подновяване на SSL
+# 13. SSL auto-renewal cron
 # ============================================
-info "Настройка на автоматично подновяване на SSL сертификат..."
+info "Setting up SSL auto-renewal..."
 
-# Добавяне на cron job за certbot renew (ако не съществува)
 CRON_JOB="0 3 * * * certbot renew --quiet --post-hook 'systemctl reload apache2'"
 if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
     (crontab -l 2>/dev/null; echo "$CRON_JOB") | crontab -
-    success "Cron job за SSL подновяване добавен (всеки ден в 03:00)"
+    success "Cron job added (daily at 03:00)"
 else
-    success "Cron job за SSL подновяване вече съществува"
+    success "Cron job already exists"
 fi
 
 # ============================================
-# 14. Финален рестарт
+# 14. Final restart
 # ============================================
-info "Рестартиране на Apache..."
+info "Restarting Apache..."
 
 systemctl restart apache2
 
-success "Apache рестартиран"
+success "Apache restarted"
 
 # ============================================
-# Готово!
+# Done!
 # ============================================
 echo ""
-echo "=========================================="
-echo -e "${GREEN}    Инсталацията завърши успешно!${NC}"
-echo "=========================================="
+echo -e "${GREEN}╔════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║             Installation Complete!                         ║${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo "URL адреси:"
-echo "  Dashboard: https://${DOMAIN}/"
-echo "  Public Upload: https://${DOMAIN}/u"
-echo "  Public Text: https://${DOMAIN}/t"
+echo "URLs:"
+echo -e "  Dashboard:      ${CYAN}https://${DOMAIN}/${NC}"
+echo -e "  Public Upload:  ${CYAN}https://${DOMAIN}/u${NC}"
+echo -e "  Public Text:    ${CYAN}https://${DOMAIN}/t${NC}"
 echo ""
-echo "Данни за вход:"
-echo "  Username: $AUTH_USER"
-echo "  Password: $AUTH_PASS"
-echo ""
-echo "Директории:"
+if [ "$PRESERVE_DATA" = false ]; then
+    echo "Login credentials:"
+    echo -e "  Username: ${GREEN}$AUTH_USER${NC}"
+    echo -e "  Password: ${GREEN}$AUTH_PASS${NC}"
+    echo ""
+fi
+echo "Directories:"
 echo "  Files: ${INSTALL_DIR}/files/"
 echo "  Texts: ${INSTALL_DIR}/texts/"
 echo ""
-echo "Функции:"
-echo "  - File upload/download/share"
-echo "  - Rich text sharing"
-echo "  - GeoIP защита (само BG по подразбиране)"
-echo "  - User management (само admin)"
-echo "  - File ownership tracking"
-echo ""
-echo "=========================================="
+echo -e "Update source: ${BLUE}$SOURCE${NC}"
+echo "To change source, edit: ${INSTALL_DIR}/.update-config.json"
 echo ""
 
-# Записване на данните в файл
-cat > "$INSTALL_DIR/CREDENTIALS.txt" << CREDS
+# Save credentials if new installation
+if [ "$PRESERVE_DATA" = false ]; then
+    cat > "$INSTALL_DIR/CREDENTIALS.txt" << CREDS
 WebShare Credentials
 ====================
 Domain: https://${DOMAIN}/
@@ -483,9 +737,11 @@ Public URLs:
   Upload: https://${DOMAIN}/u
   Text: https://${DOMAIN}/t
 
-Инсталирано на: $(date)
-Версия: 2.0
+Installed: $(date)
+Version: 3.0
+Update Source: $SOURCE
 CREDS
 
-chmod 600 "$INSTALL_DIR/CREDENTIALS.txt"
-info "Данните са записани в: ${INSTALL_DIR}/CREDENTIALS.txt"
+    chmod 600 "$INSTALL_DIR/CREDENTIALS.txt"
+    info "Credentials saved to: ${INSTALL_DIR}/CREDENTIALS.txt"
+fi

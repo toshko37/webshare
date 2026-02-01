@@ -58,8 +58,24 @@ if ($currentUser !== 'admin') {
     exit;
 }
 
-// Source URL (same as shell update script)
-$sourceUrl = 'https://webshare.techbg.net/installer/src';
+// Load update config
+$configFile = __DIR__ . '/.update-config.json';
+$config = ['stable' => true]; // Default: use GitHub
+if (file_exists($configFile)) {
+    $configData = json_decode(file_get_contents($configFile), true);
+    if (isset($configData['stable'])) {
+        $config['stable'] = (bool)$configData['stable'];
+    }
+}
+
+// Source URL based on config
+if ($config['stable']) {
+    // GitHub raw content
+    $sourceUrl = 'https://raw.githubusercontent.com/toshko37/webshare/main/src';
+} else {
+    // Dev server
+    $sourceUrl = 'https://webshare.techbg.net/src';
+}
 
 // Files to update (same list as update-remote.sh)
 $phpFiles = [

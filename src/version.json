@@ -1,0 +1,6 @@
+{
+    "version": "3.5.0",
+    "released": "2026-02-01",
+    "changelog": "New project structure with src/ folder, dual update sources (GitHub/dev), intelligent installer",
+    "download_url": "https://webshare.techbg.net/src/"
+}
