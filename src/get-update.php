@@ -3,7 +3,7 @@
 // Usage: curl -fsSL https://domain.com/get-update | bash
 
 header('Content-Type: text/plain');
-$scriptPath = __DIR__ . '/installer/update-remote.sh';
+$scriptPath = __DIR__ . '/../installer/update-remote.sh';
 if (file_exists($scriptPath)) {
     readfile($scriptPath);
 } else {

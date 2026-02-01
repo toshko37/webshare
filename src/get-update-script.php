@@ -3,7 +3,7 @@
 // This is the small script that goes in each installation
 
 header('Content-Type: text/plain');
-$scriptPath = __DIR__ . '/installer/src/update';
+$scriptPath = __DIR__ . '/get-update';
 if (file_exists($scriptPath)) {
     readfile($scriptPath);
 } else {
