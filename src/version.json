@@ -1,6 +1,6 @@
 {
     "version": "3.5.0",
     "released": "2026-02-01",
-    "changelog": "New project structure with src/ folder, dual update sources (GitHub/dev), intelligent installer",
+    "changelog": "Project restructuring (src/ folder), audit log rotation, chat UI buttons, Apache config update, automatic migration",
     "download_url": "https://webshare.techbg.net/src/"
 }

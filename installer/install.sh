@@ -1,9 +1,10 @@
 #!/bin/bash
 #
-# WebShare Installer v3.0
+# WebShare Installer v3.1
 # =======================
 # Intelligent installer with existing installation detection
 # Supports GitHub (stable) and dev server sources
+# New src/ directory structure
 #
 # Usage:
 #   sudo ./install.sh domain.com [username] [password]
@@ -82,7 +83,7 @@ echo -e "${CYAN}╦ ╦┌─┐┌┐ ╔═╗┬ ┬┌─┐┬─┐┌─�
 echo -e "${CYAN}║║║├┤ ├┴┐╚═╗├─┤├─┤├┬┘├┤ ${NC}"
 echo -e "${CYAN}╚╩╝└─┘└─┘╚═╝┴ ┴┴ ┴┴└─└─┘${NC}"
 echo ""
-echo -e "${BLUE}Installer v3.0${NC} - Source: ${GREEN}$SOURCE${NC}"
+echo -e "${BLUE}Installer v3.1${NC} - Source: ${GREEN}$SOURCE${NC}"
 echo ""
 
 # Check domain
@@ -103,6 +104,7 @@ if [ -z "$DOMAIN" ]; then
 fi
 
 INSTALL_DIR="/var/www/${DOMAIN}"
+SRC_DIR="$INSTALL_DIR/src"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GEOIP_DIR="/usr/share/GeoIP"
 
@@ -120,8 +122,8 @@ check_existing_installation() {
     echo -e "${BLUE}Checking for existing installation...${NC}"
     echo ""
 
-    # Check for index.php
-    if [ -f "$INSTALL_DIR/index.php" ]; then
+    # Check for index.php (old or new structure)
+    if [ -f "$INSTALL_DIR/src/index.php" ] || [ -f "$INSTALL_DIR/index.php" ]; then
         has_existing=true
         check_mark "WebShare installation found"
     fi
@@ -229,7 +231,9 @@ show_reinstall_menu() {
 
 # Run update instead of reinstall
 run_update() {
-    if [ -x "$INSTALL_DIR/update.sh" ]; then
+    if [ -f "$INSTALL_DIR/installer/update.sh" ]; then
+        bash "$INSTALL_DIR/installer/update.sh"
+    elif [ -x "$INSTALL_DIR/update.sh" ]; then
         cd "$INSTALL_DIR"
         ./update.sh
     elif [ -f "$SCRIPT_DIR/update.sh" ]; then
@@ -331,6 +335,7 @@ fi
 
 info "Domain: $DOMAIN"
 info "Install dir: $INSTALL_DIR"
+info "Source dir: $SRC_DIR"
 info "Admin user: $AUTH_USER"
 info "Update source: $SOURCE"
 echo ""
@@ -402,31 +407,40 @@ else
 fi
 
 # ============================================
-# 3. Create directories
+# 3. Create directory structure
 # ============================================
 info "Creating directories..."
 
+# Root directory
 mkdir -p "$INSTALL_DIR"
 
+# Data directories (in root)
 if [ "$PRESERVE_DATA" = false ]; then
     mkdir -p "$INSTALL_DIR/files"
     mkdir -p "$INSTALL_DIR/texts"
 fi
 mkdir -p "$INSTALL_DIR/backups"
-mkdir -p "$INSTALL_DIR/assets/quill"
+mkdir -p "$INSTALL_DIR/installer"
+
+# Source directory
+mkdir -p "$SRC_DIR"
+mkdir -p "$SRC_DIR/assets/quill"
+mkdir -p "$SRC_DIR/docs"
 
 success "Directories created"
 
 # ============================================
-# 4. Download/Copy source files
+# 4. Download source files to src/
 # ============================================
 info "Installing source files..."
 
 # Determine source URL
 if [ "$SOURCE" = "github" ]; then
     SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/src"
+    INSTALLER_URL="https://raw.githubusercontent.com/toshko37/webshare/main/installer"
 else
     SOURCE_URL="https://webshare.techbg.net/src"
+    INSTALLER_URL="https://webshare.techbg.net/installer"
 fi
 
 # List of files to download
@@ -437,61 +451,122 @@ PHP_FILES=(
     "user-management.php" "html-sanitizer.php" "smtp-mailer.php"
     "send-mail.php" "web-download.php" "api-upload.php"
     "api-scripts.php" "check-version.php" "do-update.php"
-    "live-update.php" "p.php" "u.php" "get.php"
-    "get-speedtest.php" "security-headers.php" "f.php"
+    "live-update.php" "p.php" "u.php" "f.php" "get.php"
+    "get-speedtest.php" "get-update.php" "get-update-script.php"
+    "security-headers.php"
 )
 
 OTHER_FILES=(
     "favicon.ico" "favicon.svg" "apple-touch-icon.png"
-    "CHANGELOG.md" "README.md" "README-BG.md" "version.json"
+    "CHANGELOG.md" "version.json"
 )
 
-# Download PHP files
+# Download PHP files to src/
 for file in "${PHP_FILES[@]}"; do
     echo -n "  $file... "
-    if curl -fsSL "$SOURCE_URL/$file" -o "$INSTALL_DIR/$file" 2>/dev/null; then
+    if curl -fsSL "$SOURCE_URL/$file" -o "$SRC_DIR/$file" 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
         echo -e "${YELLOW}skipped${NC}"
     fi
 done
 
-# Download other files
+# Download other files to src/
 for file in "${OTHER_FILES[@]}"; do
     echo -n "  $file... "
-    if curl -fsSL "$SOURCE_URL/$file" -o "$INSTALL_DIR/$file" 2>/dev/null; then
+    if curl -fsSL "$SOURCE_URL/$file" -o "$SRC_DIR/$file" 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
     else
         echo -e "${YELLOW}skipped${NC}"
     fi
 done
 
-# Download .htaccess
+# Download .htaccess to src/
 echo -n "  .htaccess... "
-if curl -fsSL "$SOURCE_URL/.htaccess" -o "$INSTALL_DIR/.htaccess" 2>/dev/null; then
+if curl -fsSL "$SOURCE_URL/.htaccess" -o "$SRC_DIR/.htaccess" 2>/dev/null; then
     echo -e "${GREEN}OK${NC}"
 else
     echo -e "${YELLOW}skipped${NC}"
+fi
+
+# Download .user.ini to src/
+echo -n "  .user.ini... "
+if curl -fsSL "$SOURCE_URL/.user.ini" -o "$SRC_DIR/.user.ini" 2>/dev/null; then
+    echo -e "${GREEN}OK${NC}"
+else
+    # Create default .user.ini
+    cat > "$SRC_DIR/.user.ini" << 'PHPINI'
+; WebShare PHP Settings
+upload_max_filesize = 10G
+post_max_size = 10G
+max_execution_time = 7200
+max_input_time = 7200
+memory_limit = 512M
+PHPINI
+    echo -e "${YELLOW}created default${NC}"
 fi
 
 # Download Quill.js assets
 echo -n "  Quill.js editor... "
-mkdir -p "$INSTALL_DIR/assets/quill"
-if curl -fsSL "$SOURCE_URL/assets/quill/quill.js" -o "$INSTALL_DIR/assets/quill/quill.js" 2>/dev/null && \
-   curl -fsSL "$SOURCE_URL/assets/quill/quill.snow.css" -o "$INSTALL_DIR/assets/quill/quill.snow.css" 2>/dev/null; then
+if curl -fsSL "$SOURCE_URL/assets/quill/quill.js" -o "$SRC_DIR/assets/quill/quill.js" 2>/dev/null && \
+   curl -fsSL "$SOURCE_URL/assets/quill/quill.snow.css" -o "$SRC_DIR/assets/quill/quill.snow.css" 2>/dev/null; then
     echo -e "${GREEN}OK${NC}"
 else
     echo -e "${YELLOW}skipped${NC}"
 fi
 
-# Copy update.sh from installer
-cp "$SCRIPT_DIR/update.sh" "$INSTALL_DIR/update.sh" 2>/dev/null || true
-chmod +x "$INSTALL_DIR/update.sh" 2>/dev/null || true
+# Download installer scripts
+echo -n "  installer/update.sh... "
+if curl -fsSL "$INSTALLER_URL/update.sh" -o "$INSTALL_DIR/installer/update.sh" 2>/dev/null; then
+    chmod +x "$INSTALL_DIR/installer/update.sh"
+    echo -e "${GREEN}OK${NC}"
+else
+    # Copy from local if available
+    [ -f "$SCRIPT_DIR/update.sh" ] && cp "$SCRIPT_DIR/update.sh" "$INSTALL_DIR/installer/" && chmod +x "$INSTALL_DIR/installer/update.sh"
+    echo -e "${YELLOW}local copy${NC}"
+fi
+
+echo -n "  installer/install.sh... "
+cp "$0" "$INSTALL_DIR/installer/install.sh" 2>/dev/null || true
+chmod +x "$INSTALL_DIR/installer/install.sh" 2>/dev/null || true
+echo -e "${GREEN}OK${NC}"
 
 success "Source files installed"
 
 # ============================================
-# 5. Configuration files
+# 5. Create symlinks in src/ for data access
+# ============================================
+info "Creating symlinks..."
+
+cd "$SRC_DIR"
+
+# Directories
+[ ! -L "files" ] && [ ! -e "files" ] && ln -sf ../files files
+[ ! -L "texts" ] && [ ! -e "texts" ] && ln -sf ../texts texts
+[ ! -L "backups" ] && [ ! -e "backups" ] && ln -sf ../backups backups
+
+# Data files
+[ ! -L ".htpasswd" ] && [ ! -e ".htpasswd" ] && ln -sf ../.htpasswd .htpasswd
+[ ! -L ".config.json" ] && [ ! -e ".config.json" ] && ln -sf ../.config.json .config.json
+[ ! -L ".geo.json" ] && [ ! -e ".geo.json" ] && ln -sf ../.geo.json .geo.json
+[ ! -L ".audit.json" ] && [ ! -e ".audit.json" ] && ln -sf ../.audit.json .audit.json
+[ ! -L ".tokens.json" ] && [ ! -e ".tokens.json" ] && ln -sf ../.tokens.json .tokens.json
+[ ! -L ".texts.json" ] && [ ! -e ".texts.json" ] && ln -sf ../.texts.json .texts.json
+[ ! -L ".files-meta.json" ] && [ ! -e ".files-meta.json" ] && ln -sf ../.files-meta.json .files-meta.json
+[ ! -L ".folder-shares.json" ] && [ ! -e ".folder-shares.json" ] && ln -sf ../.folder-shares.json .folder-shares.json
+[ ! -L ".api-keys.json" ] && [ ! -e ".api-keys.json" ] && ln -sf ../.api-keys.json .api-keys.json
+[ ! -L ".encryption-keys.json" ] && [ ! -e ".encryption-keys.json" ] && ln -sf ../.encryption-keys.json .encryption-keys.json
+[ ! -L ".mail-ratelimit.json" ] && [ ! -e ".mail-ratelimit.json" ] && ln -sf ../.mail-ratelimit.json .mail-ratelimit.json
+[ ! -L ".update-config.json" ] && [ ! -e ".update-config.json" ] && ln -sf ../.update-config.json .update-config.json
+[ ! -L ".version-check.json" ] && [ ! -e ".version-check.json" ] && ln -sf ../.version-check.json .version-check.json
+[ ! -L "GeoLite2-Country.mmdb" ] && [ ! -e "GeoLite2-Country.mmdb" ] && ln -sf ../GeoLite2-Country.mmdb GeoLite2-Country.mmdb
+
+cd "$INSTALL_DIR"
+
+success "Symlinks created"
+
+# ============================================
+# 6. Configuration files (in root)
 # ============================================
 info "Creating configuration files..."
 
@@ -518,26 +593,28 @@ UPDATECONF
 [ -f "$INSTALL_DIR/.files-meta.json" ] || echo "{}" > "$INSTALL_DIR/.files-meta.json"
 [ -f "$INSTALL_DIR/.texts.json" ] || echo "{}" > "$INSTALL_DIR/.texts.json"
 [ -f "$INSTALL_DIR/.tokens.json" ] || echo "{}" > "$INSTALL_DIR/.tokens.json"
-[ -f "$INSTALL_DIR/.audit.json" ] || echo "{}" > "$INSTALL_DIR/.audit.json"
+[ -f "$INSTALL_DIR/.audit.json" ] || echo "[]" > "$INSTALL_DIR/.audit.json"
 [ -f "$INSTALL_DIR/.api-keys.json" ] || echo "[]" > "$INSTALL_DIR/.api-keys.json"
 [ -f "$INSTALL_DIR/.config.json" ] || echo '{"mail_enabled":false}' > "$INSTALL_DIR/.config.json"
 [ -f "$INSTALL_DIR/.mail-ratelimit.json" ] || echo "{}" > "$INSTALL_DIR/.mail-ratelimit.json"
+[ -f "$INSTALL_DIR/.folder-shares.json" ] || echo "{}" > "$INSTALL_DIR/.folder-shares.json"
+[ -f "$INSTALL_DIR/.encryption-keys.json" ] || echo "{}" > "$INSTALL_DIR/.encryption-keys.json"
 
 success "Configuration created"
 
 # ============================================
-# 6. Update .htaccess with correct path
+# 7. Update .htaccess with correct path
 # ============================================
 info "Configuring .htaccess..."
 
-if [ -f "$INSTALL_DIR/.htaccess" ]; then
-    sed -i "s|AuthUserFile .*/\.htpasswd|AuthUserFile $INSTALL_DIR/.htpasswd|g" "$INSTALL_DIR/.htaccess"
+if [ -f "$SRC_DIR/.htaccess" ]; then
+    sed -i "s|AuthUserFile .*/\.htpasswd|AuthUserFile $INSTALL_DIR/.htpasswd|g" "$SRC_DIR/.htaccess"
 fi
 
 success ".htaccess configured"
 
 # ============================================
-# 7. Files directory protection
+# 8. Files directory protection
 # ============================================
 info "Protecting files directory..."
 
@@ -558,7 +635,7 @@ TEXTSHT
 success "Directories protected"
 
 # ============================================
-# 8. Create/Update .htpasswd
+# 9. Create/Update .htpasswd
 # ============================================
 if [ "$PRESERVE_DATA" = false ] || [ ! -f "$INSTALL_DIR/.htpasswd" ]; then
     info "Creating .htpasswd..."
@@ -570,45 +647,64 @@ else
 fi
 
 # ============================================
-# 9. PHP user.ini
+# 10. Copy GeoIP database locally
 # ============================================
-info "Configuring PHP..."
-
-cat > "$INSTALL_DIR/.user.ini" << 'PHPINI'
-; WebShare PHP Settings
-upload_max_filesize = 10G
-post_max_size = 10G
-max_execution_time = 7200
-max_input_time = 7200
-memory_limit = 512M
-PHPINI
-
-success "PHP configured"
+if [ -f "$GEOIP_DIR/GeoLite2-Country.mmdb" ] && [ ! -f "$INSTALL_DIR/GeoLite2-Country.mmdb" ]; then
+    cp "$GEOIP_DIR/GeoLite2-Country.mmdb" "$INSTALL_DIR/GeoLite2-Country.mmdb"
+    success "GeoIP database copied to installation"
+fi
 
 # ============================================
-# 10. Permissions
+# 11. Permissions
 # ============================================
 info "Setting permissions..."
 
-chown -R www-data:www-data "$INSTALL_DIR"
-chmod -R 755 "$INSTALL_DIR"
+# Root directory
+chown www-data:www-data "$INSTALL_DIR"
+chmod 755 "$INSTALL_DIR"
+
+# Data directories
+chown -R www-data:www-data "$INSTALL_DIR/files"
+chown -R www-data:www-data "$INSTALL_DIR/texts"
+chown -R www-data:www-data "$INSTALL_DIR/backups"
 chmod 750 "$INSTALL_DIR/files"
 chmod 750 "$INSTALL_DIR/texts"
+chmod 755 "$INSTALL_DIR/backups"
+
+# Config files in root
 chmod 600 "$INSTALL_DIR/.htpasswd" 2>/dev/null || true
 chmod 600 "$INSTALL_DIR/.api-keys.json" 2>/dev/null || true
 chmod 600 "$INSTALL_DIR/.tokens.json" 2>/dev/null || true
-chmod 644 "$INSTALL_DIR/.geo.json"
-chmod 644 "$INSTALL_DIR/.files-meta.json"
-chmod 644 "$INSTALL_DIR/.texts.json"
+chmod 600 "$INSTALL_DIR/.encryption-keys.json" 2>/dev/null || true
+chmod 644 "$INSTALL_DIR/.geo.json" 2>/dev/null || true
+chmod 644 "$INSTALL_DIR/.config.json" 2>/dev/null || true
+chmod 644 "$INSTALL_DIR/.files-meta.json" 2>/dev/null || true
+chmod 644 "$INSTALL_DIR/.texts.json" 2>/dev/null || true
+chmod 644 "$INSTALL_DIR/.audit.json" 2>/dev/null || true
+chown www-data:www-data "$INSTALL_DIR"/.*json 2>/dev/null || true
+chown www-data:www-data "$INSTALL_DIR/.htpasswd" 2>/dev/null || true
+
+# Source directory
+chown -R www-data:www-data "$SRC_DIR"
+chmod 755 "$SRC_DIR"
+chmod 644 "$SRC_DIR"/*.php 2>/dev/null || true
+chmod 644 "$SRC_DIR/.htaccess" 2>/dev/null || true
+chmod 644 "$SRC_DIR/.user.ini" 2>/dev/null || true
+
+# Installer scripts
+chmod +x "$INSTALL_DIR/installer"/*.sh 2>/dev/null || true
 
 success "Permissions set"
 
 # ============================================
-# 11. Apache Virtual Host
+# 12. Apache Virtual Host (with src/ as DocumentRoot)
 # ============================================
 info "Creating Apache Virtual Host..."
 
 cat > "/etc/apache2/sites-available/${DOMAIN}.conf" << VHOST
+# WebShare - ${DOMAIN}
+# Generated by WebShare Installer v3.1
+
 # HTTP to HTTPS redirect
 <VirtualHost *:80>
     ServerName ${DOMAIN}
@@ -629,9 +725,18 @@ cat > "/etc/apache2/sites-available/${DOMAIN}.conf" << VHOST
         ServerName ${DOMAIN}
         ServerAlias www.${DOMAIN}
 
-        DocumentRoot ${INSTALL_DIR}
+        # Source files are in src/ subdirectory
+        DocumentRoot ${SRC_DIR}
 
-        <Directory ${INSTALL_DIR}/>
+        <Directory ${SRC_DIR}/>
+            Options -Indexes +FollowSymLinks
+            AllowOverride All
+            Require all granted
+        </Directory>
+
+        # Backward compatibility: old update URLs
+        Alias /installer/src ${SRC_DIR}
+        <Directory ${SRC_DIR}>
             Options -Indexes +FollowSymLinks
             AllowOverride All
             Require all granted
@@ -657,7 +762,7 @@ a2ensite "${DOMAIN}.conf" 2>/dev/null || true
 success "Virtual Host created"
 
 # ============================================
-# 12. SSL Certificate
+# 13. SSL Certificate
 # ============================================
 info "Setting up SSL certificate..."
 
@@ -676,7 +781,7 @@ fi
 success "SSL configured"
 
 # ============================================
-# 13. SSL auto-renewal cron
+# 14. SSL auto-renewal cron
 # ============================================
 info "Setting up SSL auto-renewal..."
 
@@ -689,7 +794,7 @@ else
 fi
 
 # ============================================
-# 14. Final restart
+# 15. Final restart
 # ============================================
 info "Restarting Apache..."
 
@@ -716,12 +821,15 @@ if [ "$PRESERVE_DATA" = false ]; then
     echo -e "  Password: ${GREEN}$AUTH_PASS${NC}"
     echo ""
 fi
-echo "Directories:"
-echo "  Files: ${INSTALL_DIR}/files/"
-echo "  Texts: ${INSTALL_DIR}/texts/"
+echo "Directory structure:"
+echo "  Root:    ${INSTALL_DIR}/"
+echo "  Source:  ${INSTALL_DIR}/src/"
+echo "  Files:   ${INSTALL_DIR}/files/"
+echo "  Texts:   ${INSTALL_DIR}/texts/"
 echo ""
 echo -e "Update source: ${BLUE}$SOURCE${NC}"
-echo "To change source, edit: ${INSTALL_DIR}/.update-config.json"
+echo "To update: ${INSTALL_DIR}/installer/update.sh"
+echo "To change source: ${INSTALL_DIR}/.update-config.json"
 echo ""
 
 # Save credentials if new installation
@@ -737,11 +845,20 @@ Public URLs:
   Upload: https://${DOMAIN}/u
   Text: https://${DOMAIN}/t
 
+Directory Structure:
+  Root:   ${INSTALL_DIR}/
+  Source: ${INSTALL_DIR}/src/
+  Files:  ${INSTALL_DIR}/files/
+  Texts:  ${INSTALL_DIR}/texts/
+
 Installed: $(date)
-Version: 3.0
+Version: 3.5.0
 Update Source: $SOURCE
+
+To update: ./installer/update.sh
 CREDS
 
     chmod 600 "$INSTALL_DIR/CREDENTIALS.txt"
+    chown www-data:www-data "$INSTALL_DIR/CREDENTIALS.txt"
     info "Credentials saved to: ${INSTALL_DIR}/CREDENTIALS.txt"
 fi

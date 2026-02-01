@@ -8,6 +8,8 @@ All notable changes to WebShare will be documented in this file.
 - **New `src/` directory structure** - All source code now lives in `src/` folder
   - Cleaner project organization
   - No more file duplication between root and `installer/src/`
+  - Data files (.htpasswd, .config.json, etc.) stay in root
+  - Symlinks in src/ for seamless access to data
   - Easier maintenance and development
 
 ### Update System
@@ -15,6 +17,10 @@ All notable changes to WebShare will be documented in this file.
   - GitHub (stable): `https://raw.githubusercontent.com/toshko37/webshare/main/src/`
   - Dev server: `https://webshare.techbg.net/src/`
   - Configure via `--source github|dev` flag or `.update-config.json`
+- **Automatic migration** - Update script detects old structure and migrates
+  - Moves PHP files to src/
+  - Creates necessary symlinks
+  - Updates Apache configuration
 
 ### Intelligent Installer
 - **Existing installation detection** - Automatically detects previous installations
@@ -27,14 +33,40 @@ All notable changes to WebShare will be documented in this file.
 - **Component checking** - Shows what's installed and what will be installed
   - Apache2, PHP, php-maxminddb, php-xml, Certbot, GeoIP database
 
+### Chat UI Improvements
+- **"Затвори" (Close) button** - Returns to chat list (/t)
+- **"Изчисти" (Clear) button** - Clears all messages in conversation
+  - Red styling for visibility
+  - Confirmation dialog before clearing
+  - Audit log entry for clear action
+
+### Audit Log Rotation
+- **Log file rotation** - Prevents unlimited growth
+  - Current log keeps max 500 entries
+  - Older entries rotate to archive files (.audit.1.json, .audit.2.json, etc.)
+  - Up to 10 archives (total 5500 entries max)
+  - Automatic rotation on write
+  - Full history accessible for search and export
+
+### Apache Configuration
+- **DocumentRoot set to `src/`** - Apache serves from src/ subdirectory
+- **Backward compatibility Alias** - `/installer/src/` maps to `/src/`
+  - Old update URLs continue to work
+  - Seamless transition for existing installations
+
 ### Scripts Updated
-- `installer/install.sh` v3.0 - Full rewrite with intelligent detection
-- `installer/update.sh` v3.0 - Dual source support with `--source` flag
-- `installer/get-webshare.sh` v3.0 - Quick installer updated for new structure
+- `installer/install.sh` v3.1 - Full rewrite with src/ structure
+- `installer/update.sh` v3.1 - Migration support, symlink creation
+- `installer/get-webshare.sh` v3.0 - Quick installer for new structure
+
+### File Changes
+- New: `src/get-update.php`, `src/get-update-script.php`
+- Updated: All PHP files for new paths
+- Updated: `.htaccess` for new structure
 
 ### Breaking Changes
 - File paths changed from `/installer/src/` to `/src/`
-- Old installations will need the redirect for backwards compatibility
+- Old installations will be automatically migrated on update
 
 ---
 
@@ -417,6 +449,9 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.5.0  | 2026-02-01 | Project restructuring - src/ folder, audit log rotation, chat buttons |
+|  3.4.1  | 2026-02-01 | Beta update server option |
+|  3.4.0  | 2026-02-01 | Folder sharing, chat improvements |
 |  3.3.0  | 2026-01-31 | Chat/Conversation system - real-time multi-user chat |
 |  3.2.0  | 2026-01-29 | Major security update - 14 vulnerabilities fixed |
 |  3.1.3  | 2026-01-27 | Auto-update system, About redesign, setup.sh |

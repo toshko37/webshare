@@ -387,6 +387,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'delete' && !empty($tok
     exit;
 }
 
+// CLEAR ALL MESSAGES
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'clear' && !empty($token)) {
+    header('Content-Type: application/json');
+
+    $metadata = loadMetadata($metadataFile);
+    if (!isset($metadata[$token])) {
+        echo json_encode(['success' => false, 'error' => 'Not found']);
+        exit;
+    }
+
+    $jsonPath = $textsDir . '.' . $token . '.json';
+    $conversation = migrateToConversation($token, $textsDir, $metadata[$token]);
+
+    // Clear all messages
+    $conversation['messages'] = [];
+
+    saveConversation($jsonPath, $conversation);
+
+    // Update metadata
+    $metadata[$token]['message_count'] = 0;
+    $metadata[$token]['last_activity'] = time();
+    saveMetadata($metadataFile, $metadata);
+
+    writeAuditLog('chat_clear', "Cleared conversation: $token", 'anonymous');
+
+    echo json_encode(['success' => true]);
+    exit;
+}
+
 // HEARTBEAT (viewer presence)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'heartbeat' && !empty($token)) {
     header('Content-Type: application/json');
@@ -818,6 +847,31 @@ if ($isViewMode) {
             background: rgba(255,255,255,0.3);
         }
 
+        .action-btn {
+            padding: 5px 12px;
+            background: rgba(255,255,255,0.15);
+            border: 1px solid rgba(255,255,255,0.25);
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+            margin-right: 8px;
+        }
+
+        .action-btn:hover {
+            background: rgba(255,255,255,0.25);
+        }
+
+        .action-btn.danger {
+            background: rgba(220,53,69,0.3);
+            border-color: rgba(220,53,69,0.5);
+        }
+
+        .action-btn.danger:hover {
+            background: rgba(220,53,69,0.5);
+        }
+
         .chat-messages {
             flex: 1;
             overflow-y: auto;
@@ -1218,6 +1272,8 @@ if ($isViewMode) {
                 </div>
             </div>
             <div class="chat-header-right">
+                <button class="action-btn" onclick="goBack()" title="Затвори разговора">Затвори</button>
+                <button class="action-btn danger" onclick="clearChat()" title="Изтрий всички съобщения">Изчисти</button>
                 <div class="countdown" id="countdown">--:--:--</div>
                 <button class="extend-btn" onclick="extendTime('1h')">+1ч</button>
                 <button class="extend-btn" onclick="extendTime('1d')">+1д</button>
@@ -1624,6 +1680,33 @@ if ($isViewMode) {
             } catch (e) {
                 alert('Грешка при изтриване');
             }
+        }
+
+        // Clear all messages
+        async function clearChat() {
+            if (!confirm('Изтрий ВСИЧКИ съобщения от този разговор?')) return;
+
+            try {
+                const response = await fetch(`/t/${TOKEN}?action=clear`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    messages = [];
+                    document.getElementById('chat-messages').innerHTML = '';
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (e) {
+                alert('Грешка при изчистване');
+            }
+        }
+
+        // Go back to text list
+        function goBack() {
+            window.location.href = '/t';
         }
 
         // Send heartbeat

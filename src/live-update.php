@@ -77,7 +77,7 @@ if ($config['stable']) {
     $sourceUrl = 'https://webshare.techbg.net/src';
 }
 
-// Files to update (same list as update-remote.sh)
+// Files to update (same list as update.sh)
 $phpFiles = [
     'index.php',
     'upload.php',
@@ -102,8 +102,11 @@ $phpFiles = [
     'live-update.php',
     'p.php',
     'u.php',
+    'f.php',
     'get.php',
     'get-speedtest.php',
+    'get-update.php',
+    'get-update-script.php',
     'security-headers.php'
 ];
 
