@@ -59,3 +59,23 @@ Thumbs.db
 # Old backup files
 *.php.backup
 t.php.backup
+
+# Symlinks in src/ (for dev server only)
+src/files
+src/texts
+src/backups
+src/vendor
+src/.htpasswd
+src/.config.json
+src/.geo.json
+src/.tokens.json
+src/.texts.json
+src/.files-meta.json
+src/.audit.json
+src/.api-keys.json
+src/.folder-shares.json
+src/.encryption-keys.json
+src/.mail-ratelimit.json
+src/.version-check.json
+src/.update-config.json
+src/GeoLite2-Country.mmdb
