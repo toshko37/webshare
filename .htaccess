@@ -1,6 +1,9 @@
 # Webshare Access Control
 # =======================
 
+# Force UTF-8 encoding for all text files
+AddDefaultCharset UTF-8
+
 # URL Rewriting for clean URLs
 RewriteEngine On
 
