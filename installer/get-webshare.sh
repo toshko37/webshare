@@ -272,6 +272,12 @@ cat > "$WEBROOT/texts/.htaccess" << 'HTEOF'
 Require all denied
 HTEOF
 
+# Security .htaccess for backups/
+cat > "$WEBROOT/backups/.htaccess" << 'HTEOF'
+# Protect backup files from direct access
+Require all denied
+HTEOF
+
 # .htpasswd - only create if doesn't exist
 if [ ! -f "$WEBROOT/.htpasswd" ]; then
     htpasswd -cb "$WEBROOT/.htpasswd" "$ADMIN_USER" "$ADMIN_PASS" > /dev/null 2>&1

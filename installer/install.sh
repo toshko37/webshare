@@ -644,6 +644,11 @@ cat > "$INSTALL_DIR/texts/.htaccess" << 'TEXTSHT'
 Require all denied
 TEXTSHT
 
+cat > "$INSTALL_DIR/backups/.htaccess" << 'BACKUPSHT'
+# Protect backup files from direct access
+Require all denied
+BACKUPSHT
+
 success "Directories protected"
 
 # ============================================
