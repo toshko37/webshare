@@ -202,7 +202,7 @@ PHP_FILES=(
     "api-scripts.php" "check-version.php" "do-update.php"
     "live-update.php" "p.php" "u.php" "f.php" "get.php"
     "get-speedtest.php" "get-update.php" "get-update-script.php"
-    "security-headers.php"
+    "security-headers.php" "security-check.php"
 )
 
 OTHER_FILES=(
