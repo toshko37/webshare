@@ -395,6 +395,20 @@ certbot --apache -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-
     echo -e "${YELLOW}Run manually: certbot --apache -d ${DOMAIN}${NC}"
 }
 
+# Fix SSL vhost if it has wrong paths (certbot may copy from old config)
+SSL_VHOST="/etc/apache2/sites-available/webshare-le-ssl.conf"
+if [ -f "$SSL_VHOST" ]; then
+    if grep -q "DocumentRoot" "$SSL_VHOST" && ! grep -q "DocumentRoot ${SRC_DIR}" "$SSL_VHOST"; then
+        echo -e "${YELLOW}Fixing SSL vhost paths...${NC}"
+        # Update DocumentRoot and Directory paths
+        sed -i "s|DocumentRoot /var/www/[^/]*/src|DocumentRoot ${SRC_DIR}|g" "$SSL_VHOST"
+        sed -i "s|<Directory /var/www/[^/]*/src>|<Directory ${SRC_DIR}>|g" "$SSL_VHOST"
+        sed -i "s|Alias /installer/src /var/www/[^/]*/src|Alias /installer/src ${SRC_DIR}|g" "$SSL_VHOST"
+        systemctl reload apache2
+        echo -e "${GREEN}SSL vhost paths fixed${NC}"
+    fi
+fi
+
 # SSL auto-renewal cron
 CRON_JOB="0 3 * * * certbot renew --quiet --post-hook 'systemctl reload apache2'"
 if ! crontab -l 2>/dev/null | grep -q "certbot renew"; then
