@@ -1,5 +1,7 @@
 # Webshare Access Control
 # =======================
+# This file is served as htaccess.txt for update scripts to download
+# The install script will rename it to .htaccess and update the AuthUserFile path
 
 # Force UTF-8 encoding for all text files
 AddDefaultCharset UTF-8
@@ -52,7 +54,8 @@ RewriteRule ^get-update-script$ get-update-script.php [QSA,L]
 # Set authentication for the directory
 AuthType Basic
 AuthName "WebShare - Protected Area"
-AuthUserFile /var/www/webshare/.htpasswd
+# NOTE: Update this path after installation!
+AuthUserFile __HTPASSWD_PATH__
 
 # Public files - no authentication required (Apache 2.4 syntax)
 <FilesMatch "^(public|p|upload|u|t|f|get|get-speedtest|get-update|get-update-script|api-upload|api-scripts)\.php$">
@@ -64,8 +67,13 @@ AuthUserFile /var/www/webshare/.htpasswd
     Require all granted
 </FilesMatch>
 
-# htaccess.txt and user.ini.txt - public (for updates)
-<FilesMatch "^(htaccess|user\.ini)\.txt$">
+# htaccess.txt - public (for updates)
+<FilesMatch "^htaccess\.txt$">
+    Require all granted
+</FilesMatch>
+
+# user.ini.txt - public (for updates)
+<FilesMatch "^user\.ini\.txt$">
     Require all granted
 </FilesMatch>
 
@@ -74,8 +82,8 @@ AuthUserFile /var/www/webshare/.htpasswd
     Require valid-user
 </FilesMatch>
 
-# Non-PHP files that need protection (except version.json)
-<FilesMatch "^(?!version\.json$).*\.(json|html|htm|txt)$">
+# Non-PHP files that need protection (except version.json, htaccess.txt, user.ini.txt)
+<FilesMatch "^(?!version\.json$|htaccess\.txt$|user\.ini\.txt$).*\.(json|html|htm|txt)$">
     Require valid-user
 </FilesMatch>
 

@@ -481,17 +481,27 @@ for file in "${OTHER_FILES[@]}"; do
     fi
 done
 
-# Download .htaccess to src/
+# Download .htaccess to src/ (GitHub: .htaccess, Dev: htaccess.txt)
 echo -n "  .htaccess... "
-if curl -fsSL "$SOURCE_URL/.htaccess" -o "$SRC_DIR/.htaccess" 2>/dev/null; then
+if [ "$SOURCE" = "github" ]; then
+    HTACCESS_URL="$SOURCE_URL/.htaccess"
+else
+    HTACCESS_URL="$SOURCE_URL/htaccess.txt"
+fi
+if curl -fsSL "$HTACCESS_URL" -o "$SRC_DIR/.htaccess" 2>/dev/null; then
     echo -e "${GREEN}OK${NC}"
 else
     echo -e "${YELLOW}skipped${NC}"
 fi
 
-# Download .user.ini to src/
+# Download .user.ini to src/ (GitHub: .user.ini, Dev: user.ini.txt)
 echo -n "  .user.ini... "
-if curl -fsSL "$SOURCE_URL/.user.ini" -o "$SRC_DIR/.user.ini" 2>/dev/null; then
+if [ "$SOURCE" = "github" ]; then
+    USERINI_URL="$SOURCE_URL/.user.ini"
+else
+    USERINI_URL="$SOURCE_URL/user.ini.txt"
+fi
+if curl -fsSL "$USERINI_URL" -o "$SRC_DIR/.user.ini" 2>/dev/null; then
     echo -e "${GREEN}OK${NC}"
 else
     # Create default .user.ini
@@ -608,7 +618,9 @@ success "Configuration created"
 info "Configuring .htaccess..."
 
 if [ -f "$SRC_DIR/.htaccess" ]; then
+    # Handle both GitHub version (has actual path) and dev version (has placeholder)
     sed -i "s|AuthUserFile .*/\.htpasswd|AuthUserFile $INSTALL_DIR/.htpasswd|g" "$SRC_DIR/.htaccess"
+    sed -i "s|__HTPASSWD_PATH__|$INSTALL_DIR/.htpasswd|g" "$SRC_DIR/.htaccess"
 fi
 
 success ".htaccess configured"

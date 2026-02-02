@@ -194,8 +194,21 @@ try {
         downloadFile($url, $dest); // Optional files, don't fail if missing
     }
 
-    // Download .htaccess (stored as htaccess.txt)
-    downloadFile("$sourceUrl/htaccess.txt", "$tempDir/.htaccess");
+    // Download .htaccess (GitHub: .htaccess, Dev: htaccess.txt)
+    $htaccessUrl = $config['stable'] ? "$sourceUrl/.htaccess" : "$sourceUrl/htaccess.txt";
+    if (downloadFile($htaccessUrl, "$tempDir/.htaccess")) {
+        // Update AuthUserFile path if using dev server version
+        if (!$config['stable']) {
+            $htaccessContent = file_get_contents("$tempDir/.htaccess");
+            $installRoot = dirname($installDir); // Go up from src/ to root
+            $htaccessContent = str_replace('__HTPASSWD_PATH__', "$installRoot/.htpasswd", $htaccessContent);
+            file_put_contents("$tempDir/.htaccess", $htaccessContent);
+        }
+    }
+
+    // Download .user.ini (GitHub: .user.ini, Dev: user.ini.txt)
+    $userIniUrl = $config['stable'] ? "$sourceUrl/.user.ini" : "$sourceUrl/user.ini.txt";
+    downloadFile($userIniUrl, "$tempDir/.user.ini");
 
     $result['steps'][count($result['steps'])-1]['status'] = 'done';
     $result['steps'][count($result['steps'])-1]['detail'] = count($downloadedFiles) . ' files downloaded';

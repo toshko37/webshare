@@ -335,9 +335,17 @@ for file in "favicon.ico" "favicon.svg" "apple-touch-icon.png"; do
     fi
 done
 
-# .htaccess
+# .htaccess (GitHub: .htaccess, Dev: htaccess.txt)
 echo -n "  .htaccess... "
-if curl -fsSL "$SOURCE_URL/.htaccess" -o ".htaccess.new" 2>/dev/null; then
+HTACCESS_URL="$SOURCE_URL/.htaccess"
+if [ "$USE_STABLE" != "true" ]; then
+    HTACCESS_URL="$SOURCE_URL/htaccess.txt"
+fi
+if curl -fsSL "$HTACCESS_URL" -o ".htaccess.new" 2>/dev/null; then
+    # Update AuthUserFile path if using dev server version
+    if [ "$USE_STABLE" != "true" ]; then
+        sed -i "s|__HTPASSWD_PATH__|$INSTALL_DIR/.htpasswd|g" ".htaccess.new"
+    fi
     mv ".htaccess.new" ".htaccess"
     echo -e "${GREEN}OK${NC}"
 else
@@ -345,9 +353,13 @@ else
     rm -f ".htaccess.new"
 fi
 
-# .user.ini
+# .user.ini (GitHub: .user.ini, Dev: user.ini.txt)
 echo -n "  .user.ini... "
-if curl -fsSL "$SOURCE_URL/.user.ini" -o ".user.ini.new" 2>/dev/null; then
+USERINI_URL="$SOURCE_URL/.user.ini"
+if [ "$USE_STABLE" != "true" ]; then
+    USERINI_URL="$SOURCE_URL/user.ini.txt"
+fi
+if curl -fsSL "$USERINI_URL" -o ".user.ini.new" 2>/dev/null; then
     mv ".user.ini.new" ".user.ini"
     echo -e "${GREEN}OK${NC}"
 else

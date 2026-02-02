@@ -1,0 +1,9 @@
+; WebShare PHP Settings
+; This file is served as user.ini.txt for update scripts to download
+; The install script will rename it to .user.ini
+
+upload_max_filesize = 10G
+post_max_size = 10G
+max_execution_time = 7200
+max_input_time = 7200
+memory_limit = 512M

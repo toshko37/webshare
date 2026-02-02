@@ -17,8 +17,9 @@ NC='\033[0m'
 
 # Get install directory from environment or use default
 INSTALL_DIR="${INSTALL_DIR:-/var/www/webshare}"
+SRC_DIR="$INSTALL_DIR/src"
 BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
-SOURCE_URL="https://webshare.techbg.net/installer/src"
+SOURCE_URL="https://webshare.techbg.net/src"
 AUTO_CONFIRM=false
 
 # Parse arguments
@@ -60,26 +61,30 @@ else
     echo -e "${GREEN}Auto-confirm enabled, proceeding...${NC}"
 fi
 
+# Verify new structure exists
+if [ ! -d "$SRC_DIR" ]; then
+    echo -e "${RED}Error: src/ directory not found at $SRC_DIR${NC}"
+    echo "This update script requires the new src/ structure."
+    echo "Please run: curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/install.sh | sudo bash -s -- your-domain.com"
+    exit 1
+fi
+
 # Step 1: Create backup (software only, not uploaded files)
 echo ""
 echo -e "${BLUE}[1/6] Creating backup...${NC}"
 mkdir -p "$BACKUP_DIR"
 
-# Copy only software files, exclude files/ and texts/ directories
-for item in "$INSTALL_DIR"/*; do
-    basename=$(basename "$item")
-    if [ "$basename" != "files" ] && [ "$basename" != "texts" ] && [ "$basename" != "installer" ]; then
-        cp -r "$item" "$BACKUP_DIR"/ 2>/dev/null || true
-    fi
+# Backup PHP files from src/
+for item in "$SRC_DIR"/*.php; do
+    [ -f "$item" ] && cp "$item" "$BACKUP_DIR"/ 2>/dev/null || true
 done
 
-# Copy hidden files (configs)
-cp "$INSTALL_DIR"/.htaccess "$BACKUP_DIR"/ 2>/dev/null || true
+# Copy hidden files (configs from root)
 cp "$INSTALL_DIR"/.htpasswd "$BACKUP_DIR"/ 2>/dev/null || true
-cp "$INSTALL_DIR"/.user.ini "$BACKUP_DIR"/ 2>/dev/null || true
 cp "$INSTALL_DIR"/.config.json "$BACKUP_DIR"/ 2>/dev/null || true
 cp "$INSTALL_DIR"/.geo.json "$BACKUP_DIR"/ 2>/dev/null || true
-# Don't backup data files (.files-meta.json, .tokens.json, etc.) - they should stay in place
+cp "$SRC_DIR"/.htaccess "$BACKUP_DIR"/ 2>/dev/null || true
+cp "$SRC_DIR"/.user.ini "$BACKUP_DIR"/ 2>/dev/null || true
 
 echo -e "${GREEN}Backup created: $BACKUP_DIR${NC}"
 
@@ -164,9 +169,13 @@ PHP_FILES=(
     "u.php"
     "get.php"
     "get-speedtest.php"
+    "get-update.php"
+    "get-update-script.php"
+    "security-headers.php"
+    "f.php"
 )
 
-cd "$INSTALL_DIR"
+cd "$SRC_DIR"
 
 for file in "${PHP_FILES[@]}"; do
     echo -n "  $file... "
@@ -198,6 +207,8 @@ done
 # .htaccess
 echo -n "  .htaccess... "
 if curl -fsSL "$SOURCE_URL/htaccess.txt" -o ".htaccess.new" 2>/dev/null; then
+    # Update AuthUserFile path
+    sed -i "s|__HTPASSWD_PATH__|$INSTALL_DIR/.htpasswd|g" ".htaccess.new"
     mv ".htaccess.new" ".htaccess"
     echo -e "${GREEN}OK${NC}"
 else
@@ -215,14 +226,24 @@ else
     rm -f ".user.ini.new"
 fi
 
+# version.json
+echo -n "  version.json... "
+if curl -fsSL "$SOURCE_URL/version.json" -o "version.json.new" 2>/dev/null; then
+    mv "version.json.new" "version.json"
+    echo -e "${GREEN}OK${NC}"
+else
+    echo -e "${YELLOW}skipped${NC}"
+    rm -f "version.json.new"
+fi
+
 # Quill.js assets
 echo -n "  Quill.js editor... "
-mkdir -p "$INSTALL_DIR/assets/quill"
+mkdir -p "$SRC_DIR/assets/quill"
 QUILL_OK=true
-if ! curl -fsSL "$SOURCE_URL/assets/quill/quill.js" -o "$INSTALL_DIR/assets/quill/quill.js" 2>/dev/null; then
+if ! curl -fsSL "$SOURCE_URL/assets/quill/quill.js" -o "$SRC_DIR/assets/quill/quill.js" 2>/dev/null; then
     QUILL_OK=false
 fi
-if ! curl -fsSL "$SOURCE_URL/assets/quill/quill.snow.css" -o "$INSTALL_DIR/assets/quill/quill.snow.css" 2>/dev/null; then
+if ! curl -fsSL "$SOURCE_URL/assets/quill/quill.snow.css" -o "$SRC_DIR/assets/quill/quill.snow.css" 2>/dev/null; then
     QUILL_OK=false
 fi
 if [ "$QUILL_OK" = true ]; then
@@ -231,39 +252,39 @@ else
     echo -e "${YELLOW}skipped${NC}"
 fi
 
-# Update script itself
-echo -n "  update.sh... "
-if curl -fsSL "https://webshare.techbg.net/get-update-script" -o "$INSTALL_DIR/update.sh.new" 2>/dev/null; then
-    mv "$INSTALL_DIR/update.sh.new" "$INSTALL_DIR/update.sh"
-    chmod +x "$INSTALL_DIR/update.sh"
-    # Remove old update (without .sh) if exists
-    rm -f "$INSTALL_DIR/update" 2>/dev/null
+# Installer scripts
+INSTALLER_URL="https://webshare.techbg.net/installer"
+mkdir -p "$INSTALL_DIR/installer"
+
+echo -n "  installer/update.sh... "
+if curl -fsSL "$INSTALLER_URL/update.sh" -o "$INSTALL_DIR/installer/update.sh.new" 2>/dev/null; then
+    mv "$INSTALL_DIR/installer/update.sh.new" "$INSTALL_DIR/installer/update.sh"
+    chmod +x "$INSTALL_DIR/installer/update.sh"
     echo -e "${GREEN}OK${NC}"
 else
     echo -e "${YELLOW}skipped${NC}"
-    rm -f "$INSTALL_DIR/update.sh.new"
+    rm -f "$INSTALL_DIR/installer/update.sh.new"
 fi
 
-# Install local script
-echo -n "  install-local.sh... "
-if curl -fsSL "$SOURCE_URL/install-local.sh" -o "$INSTALL_DIR/install-local.sh.new" 2>/dev/null; then
-    mv "$INSTALL_DIR/install-local.sh.new" "$INSTALL_DIR/install-local.sh"
-    chmod +x "$INSTALL_DIR/install-local.sh"
+echo -n "  installer/install.sh... "
+if curl -fsSL "$INSTALLER_URL/install.sh" -o "$INSTALL_DIR/installer/install.sh.new" 2>/dev/null; then
+    mv "$INSTALL_DIR/installer/install.sh.new" "$INSTALL_DIR/installer/install.sh"
+    chmod +x "$INSTALL_DIR/installer/install.sh"
     echo -e "${GREEN}OK${NC}"
 else
     echo -e "${YELLOW}skipped${NC}"
-    rm -f "$INSTALL_DIR/install-local.sh.new"
+    rm -f "$INSTALL_DIR/installer/install.sh.new"
 fi
 
-# Documentation files
-for file in "README.md" "README-BG.md" "CHANGELOG.md"; do
+# Documentation files (in src/)
+for file in "CHANGELOG.md"; do
     echo -n "  $file... "
-    if curl -fsSL "$SOURCE_URL/$file" -o "$file.new" 2>/dev/null; then
-        mv "$file.new" "$file"
+    if curl -fsSL "$SOURCE_URL/$file" -o "$SRC_DIR/$file.new" 2>/dev/null; then
+        mv "$SRC_DIR/$file.new" "$SRC_DIR/$file"
         echo -e "${GREEN}OK${NC}"
     else
         echo -e "${YELLOW}skipped${NC}"
-        rm -f "$file.new"
+        rm -f "$SRC_DIR/$file.new"
     fi
 done
 
@@ -272,18 +293,20 @@ echo ""
 echo -e "${BLUE}[5/6] Setting permissions...${NC}"
 chown -R www-data:www-data "$INSTALL_DIR"
 chmod 755 "$INSTALL_DIR"
-chmod +x "$INSTALL_DIR"/*.sh 2>/dev/null || true
-chmod 644 "$INSTALL_DIR"/*.php 2>/dev/null || true
-chmod 644 "$INSTALL_DIR"/*.md 2>/dev/null || true
-chmod 644 "$INSTALL_DIR"/*.ico 2>/dev/null || true
-chmod 644 "$INSTALL_DIR"/*.svg 2>/dev/null || true
-chmod 644 "$INSTALL_DIR"/*.png 2>/dev/null || true
+chmod 755 "$SRC_DIR"
+chmod +x "$INSTALL_DIR/installer"/*.sh 2>/dev/null || true
+chmod 644 "$SRC_DIR"/*.php 2>/dev/null || true
+chmod 644 "$SRC_DIR"/*.md 2>/dev/null || true
+chmod 644 "$SRC_DIR"/*.ico 2>/dev/null || true
+chmod 644 "$SRC_DIR"/*.svg 2>/dev/null || true
+chmod 644 "$SRC_DIR"/*.png 2>/dev/null || true
 chmod 600 "$INSTALL_DIR"/.*.json 2>/dev/null || true
-chmod 644 "$INSTALL_DIR"/.htaccess 2>/dev/null || true
-chmod 644 "$INSTALL_DIR"/.htpasswd 2>/dev/null || true
+chmod 644 "$SRC_DIR"/.htaccess 2>/dev/null || true
+chmod 644 "$SRC_DIR"/.user.ini 2>/dev/null || true
+chmod 600 "$INSTALL_DIR"/.htpasswd 2>/dev/null || true
 chmod -R 755 "$INSTALL_DIR/files" 2>/dev/null || true
 chmod -R 755 "$INSTALL_DIR/texts" 2>/dev/null || true
-chmod -R 755 "$INSTALL_DIR/assets" 2>/dev/null || true
+chmod -R 755 "$SRC_DIR/assets" 2>/dev/null || true
 echo -e "${GREEN}Permissions set${NC}"
 
 # Step 6: Verify
@@ -291,9 +314,9 @@ echo ""
 echo -e "${BLUE}[6/6] Verifying update...${NC}"
 
 # Get new version
-NEW_VERSION=$(grep "WEBSHARE_VERSION" "$INSTALL_DIR/index.php" 2>/dev/null | head -1 | sed "s/.*'\([0-9.]*\)'.*/\1/" || echo "unknown")
+NEW_VERSION=$(grep "WEBSHARE_VERSION" "$SRC_DIR/index.php" 2>/dev/null | head -1 | sed "s/.*'\([0-9.]*\)'.*/\1/" || echo "unknown")
 
-if [ -f "$INSTALL_DIR/index.php" ] && [ -f "$INSTALL_DIR/folder-management.php" ]; then
+if [ -f "$SRC_DIR/index.php" ] && [ -f "$SRC_DIR/folder-management.php" ]; then
     echo -e "${GREEN}Update successful!${NC}"
     echo ""
     echo -e "New version: ${GREEN}${NEW_VERSION}${NC}"
@@ -310,9 +333,13 @@ echo -e "${GREEN}╚════════════════════
 echo ""
 echo "Backup location: $BACKUP_DIR"
 echo ""
+echo "Structure:"
+echo "  Root:   $INSTALL_DIR/"
+echo "  Source: $SRC_DIR/"
+echo ""
 echo "If something went wrong, restore with:"
-echo -e "${YELLOW}  cp -r $BACKUP_DIR/* $INSTALL_DIR/"
-echo -e "  cp $BACKUP_DIR/.* $INSTALL_DIR/${NC}"
+echo -e "${YELLOW}  cp -r $BACKUP_DIR/*.php $SRC_DIR/"
+echo -e "  cp $BACKUP_DIR/.htaccess $SRC_DIR/${NC}"
 echo ""
 echo "Delete backup after verifying:"
 echo -e "${YELLOW}  rm -rf $BACKUP_DIR${NC}"

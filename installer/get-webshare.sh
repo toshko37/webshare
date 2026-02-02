@@ -188,11 +188,19 @@ for file in "${OTHER_FILES[@]}"; do
     curl -fsSL "$SOURCE_URL/$file" -o "$SRC_DIR/$file" 2>/dev/null || true
 done
 
-# Download .htaccess to src/
-curl -fsSL "$SOURCE_URL/.htaccess" -o "$SRC_DIR/.htaccess" 2>/dev/null || true
+# Download .htaccess to src/ (GitHub: .htaccess, Dev: htaccess.txt)
+if [ "$SOURCE" = "github" ]; then
+    curl -fsSL "$SOURCE_URL/.htaccess" -o "$SRC_DIR/.htaccess" 2>/dev/null || true
+else
+    curl -fsSL "$SOURCE_URL/htaccess.txt" -o "$SRC_DIR/.htaccess" 2>/dev/null || true
+fi
 
-# Download .user.ini to src/
-curl -fsSL "$SOURCE_URL/.user.ini" -o "$SRC_DIR/.user.ini" 2>/dev/null || {
+# Download .user.ini to src/ (GitHub: .user.ini, Dev: user.ini.txt)
+if [ "$SOURCE" = "github" ]; then
+    curl -fsSL "$SOURCE_URL/.user.ini" -o "$SRC_DIR/.user.ini" 2>/dev/null
+else
+    curl -fsSL "$SOURCE_URL/user.ini.txt" -o "$SRC_DIR/.user.ini" 2>/dev/null
+fi || {
     cat > "$SRC_DIR/.user.ini" << 'PHPINI'
 ; WebShare PHP Settings
 upload_max_filesize = 10G
@@ -212,8 +220,9 @@ curl -fsSL "$INSTALLER_URL/update.sh" -o "$WEBROOT/installer/update.sh" 2>/dev/n
 curl -fsSL "$INSTALLER_URL/install.sh" -o "$WEBROOT/installer/install.sh" 2>/dev/null || true
 chmod +x "$WEBROOT/installer"/*.sh 2>/dev/null || true
 
-# Fix .htaccess path
+# Fix .htaccess path (handle both GitHub version and dev version with placeholder)
 sed -i "s|AuthUserFile .*/\.htpasswd|AuthUserFile $WEBROOT/.htpasswd|g" "$SRC_DIR/.htaccess" 2>/dev/null || true
+sed -i "s|__HTPASSWD_PATH__|$WEBROOT/.htpasswd|g" "$SRC_DIR/.htaccess" 2>/dev/null || true
 
 echo -e "${GREEN}Files downloaded${NC}"
 
