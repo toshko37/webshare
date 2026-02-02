@@ -138,6 +138,33 @@ function getCurrentUser() {
     return $_SERVER['PHP_AUTH_USER'] ?? $_SERVER['REMOTE_USER'] ?? 'unknown';
 }
 
+/**
+ * Check if current user is an admin
+ * Admins are defined in .config.json under "admin_users" array
+ * If not configured, first user in .htpasswd is considered admin
+ */
+function isAdmin($username = null) {
+    if ($username === null) {
+        $username = getCurrentUser();
+    }
+
+    // Load config
+    $configFile = __DIR__ . '/.config.json';
+    $config = [];
+    if (file_exists($configFile)) {
+        $config = json_decode(file_get_contents($configFile), true) ?? [];
+    }
+
+    // Check if admin_users is configured
+    if (isset($config['admin_users']) && is_array($config['admin_users'])) {
+        return in_array($username, $config['admin_users']);
+    }
+
+    // Fallback: first user in .htpasswd is admin
+    $users = getUsers();
+    return !empty($users) && $users[0] === $username;
+}
+
 // ============================================
 // File Ownership Tracking
 // ============================================

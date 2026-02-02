@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.5.3');
+define('WEBSHARE_VERSION', '3.5.4');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
@@ -53,7 +53,7 @@ require_once __DIR__ . '/encryption.php';
 
 // Get current user
 $currentUser = getCurrentUser();
-$isAdmin = ($currentUser === 'admin');
+$isAdmin = isAdmin($currentUser);
 
 // Get available folders for this user
 $userFolders = getUserFolders($currentUser);
@@ -2389,7 +2389,7 @@ function getRecentChanges($limit = 8) {
             <span class="current-user">👤 <?= htmlspecialchars($currentUser) ?></span>
             <a href="?logout=1" class="logout-link" onclick="return doLogout()">🚪 Logout</a>
         </div>
-        <h1><a href="#" onclick="showAboutModal(); return false;" style="color: inherit; text-decoration: none;" title="About WebShare">WebShare</a> <a href="#" id="versionLink" onclick="showUpdateModal(); return false;" style="font-size: 14px; color: #888; font-weight: normal; text-decoration: none;" title="Check for Updates">v<?= WEBSHARE_VERSION ?></a></h1>
+        <h1><a href="#" onclick="showAboutModal(); return false;" style="color: inherit; text-decoration: none;" title="About WebShare">WebShare</a> <?php if ($isAdmin): ?><a href="#" id="versionLink" onclick="showUpdateModal(); return false;" style="font-size: 14px; color: #888; font-weight: normal; text-decoration: none;" title="Check for Updates">v<?= WEBSHARE_VERSION ?></a><?php else: ?><span style="font-size: 14px; color: #888; font-weight: normal;">v<?= WEBSHARE_VERSION ?></span><?php endif; ?></h1>
         <p class="subtitle">Simple File Sharing System</p>
 
         <?php if (isset($success)): ?>
@@ -3575,6 +3575,9 @@ systemctl reload apache2</code>
         // CSRF token for AJAX requests
         var csrfToken = '<?= htmlspecialchars($_SESSION['csrf_token']) ?>';
 
+        // Admin check for update functionality
+        var isAdmin = <?= $isAdmin ? 'true' : 'false' ?>;
+
         // Global variables for audit log
         var currentAuditPage = 1;
         var auditLogLoaded = false;
@@ -4610,6 +4613,7 @@ systemctl reload apache2</code>
         let updateData = null;
 
         function showUpdateModal() {
+            if (!isAdmin) return; // Only admins can access updates
             document.getElementById('updateModal').classList.add('show');
             // If we don't have data yet, check now
             if (!updateData) {
@@ -4785,8 +4789,10 @@ systemctl reload apache2</code>
             }
         }
 
-        // Auto-check for updates on page load (non-blocking)
+        // Auto-check for updates on page load (non-blocking, admin only)
         function initUpdateCheck() {
+            if (!isAdmin) return; // Only admins can check for updates
+
             const autoCheck = localStorage.getItem('webshare_auto_update_check') !== 'false';
             document.getElementById('autoUpdateCheck').checked = autoCheck;
 
@@ -6095,7 +6101,8 @@ systemctl reload apache2</code>
         </div>
     </div>
 
-    <!-- Update Modal -->
+    <!-- Update Modal (Admin Only) -->
+    <?php if ($isAdmin): ?>
     <div class="modal" id="updateModal">
         <div class="modal-content" style="max-width: 450px;">
             <h3>Software Update</h3>
@@ -6119,6 +6126,7 @@ systemctl reload apache2</code>
             </div>
         </div>
     </div>
+    <?php endif; ?>
 
     <!-- Changelog Modal (kept for direct access) -->
     <div class="modal" id="changelogModal">

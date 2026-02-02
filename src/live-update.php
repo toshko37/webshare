@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/security-check.php';
+require_once __DIR__ . '/user-management.php';
 
 // Prevent any output before JSON
 ob_start();
@@ -52,9 +53,8 @@ if (!isset($_SERVER['PHP_AUTH_USER'])) {
     exit;
 }
 
-// Check if admin (only 'admin' user can update)
-$currentUser = $_SERVER['PHP_AUTH_USER'];
-if ($currentUser !== 'admin') {
+// Check if admin (configured in .config.json or first user in .htpasswd)
+if (!isAdmin()) {
     http_response_code(403);
     echo json_encode(['success' => false, 'error' => 'Admin access required']);
     exit;

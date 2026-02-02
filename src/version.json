@@ -1,6 +1,6 @@
 {
-    "version": "3.5.3",
+    "version": "3.5.4",
     "released": "2026-02-02",
-    "changelog": "Fixed installer symlink creation, preserve existing config on reinstall",
+    "changelog": "Admin-only updates, configurable admin users, installer --path option",
     "download_url": "https://webshare.techbg.net/"
 }

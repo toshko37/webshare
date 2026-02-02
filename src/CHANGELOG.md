@@ -2,6 +2,23 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.5.4] - 2026-02-02
+
+### Security
+- **Admin-only Software Updates** - Only admin users can access update functionality
+  - Version link clickable only for admins
+  - Update modal hidden for non-admins
+  - Backend checks in do-update.php and live-update.php
+- **Configurable admin users** - Add `admin_users` array to `.config.json`
+  - If not configured, first user in `.htpasswd` is admin
+- **.htaccess security check** - Protected PHP files check for .htaccess existence
+
+### Installer
+- **Custom installation path** - New `--path` option for get-webshare.sh
+  - Example: `--path /var/www/mywebshare`
+- **Existing vhost detection** - Warns if Apache vhost points to different path
+- **Backups protection** - Added `.htaccess` to backups/ directory
+
 ## [3.5.3] - 2026-02-02
 
 ### Installer Fixes

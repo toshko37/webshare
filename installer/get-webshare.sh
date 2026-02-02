@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# WebShare Quick Installer v3.2
+# WebShare Quick Installer v3.3
 # =============================
 # One-line installer for WebShare
 #
@@ -11,6 +11,13 @@
 #
 # Usage (from dev server):
 #   curl -fsSL https://webshare.techbg.net/get | sudo bash -s -- --source dev domain.com
+#
+# Custom installation path:
+#   curl -fsSL ... | sudo bash -s -- --path /var/www/mywebshare domain.com admin mypass
+#
+# Options:
+#   --source github|dev   Update source (default: github)
+#   --path /path/to/dir   Installation directory (default: /var/www/webshare)
 #
 
 set -e
@@ -29,7 +36,7 @@ echo '╦ ╦┌─┐┌┐ ╔═╗┬ ┬┌─┐┬─┐┌─┐'
 echo '║║║├┤ ├┴┐╚═╗├─┤├─┤├┬┘├┤ '
 echo '╚╩╝└─┘└─┘╚═╝┴ ┴┴ ┴┴└─└─┘'
 echo -e "${NC}"
-echo -e "${BLUE}Quick Installer v3.2${NC}"
+echo -e "${BLUE}Quick Installer v3.3${NC}"
 echo ""
 
 # Check root
@@ -52,6 +59,7 @@ SOURCE="github"
 DOMAIN=""
 ADMIN_USER="admin"
 ADMIN_PASS=""
+INSTALL_PATH=""
 ARG_INDEX=0
 
 # Parse arguments
@@ -59,6 +67,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --source)
             SOURCE="$2"
+            shift 2
+            ;;
+        --path)
+            INSTALL_PATH="$2"
             shift 2
             ;;
         -*)
@@ -118,8 +130,28 @@ else
     INSTALLER_URL="https://webshare.techbg.net/installer"
 fi
 
-WEBROOT="/var/www/webshare"
+# Set installation path (default: /var/www/webshare)
+WEBROOT="${INSTALL_PATH:-/var/www/webshare}"
 SRC_DIR="$WEBROOT/src"
+
+echo -e "  Path:   ${GREEN}${WEBROOT}${NC}"
+echo ""
+
+# ============================================
+# Check for existing Apache vhost with different path
+# ============================================
+EXISTING_VHOST=$(grep -rl "ServerName.*${DOMAIN}" /etc/apache2/sites-available/ 2>/dev/null | head -1)
+if [ -n "$EXISTING_VHOST" ]; then
+    EXISTING_DOCROOT=$(grep -oP 'DocumentRoot\s+\K[^\s]+' "$EXISTING_VHOST" 2>/dev/null | head -1)
+    if [ -n "$EXISTING_DOCROOT" ] && [ "$EXISTING_DOCROOT" != "$SRC_DIR" ]; then
+        echo -e "${YELLOW}Warning: Existing vhost found for ${DOMAIN}${NC}"
+        echo -e "  Current DocumentRoot: ${EXISTING_DOCROOT}"
+        echo -e "  New DocumentRoot:     ${SRC_DIR}"
+        echo ""
+        echo -e "${YELLOW}The vhost will be updated to the new path.${NC}"
+        echo ""
+    fi
+fi
 
 # ============================================
 # 1. Install dependencies
