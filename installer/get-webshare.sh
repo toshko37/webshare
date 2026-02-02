@@ -17,7 +17,7 @@
 #
 # Options:
 #   --source github|dev   Update source (default: github)
-#   --path /path/to/dir   Installation directory (default: /var/www/webshare)
+#   --path /path/to/dir   Installation directory (default: current directory)
 #
 
 set -e
@@ -130,8 +130,8 @@ else
     INSTALLER_URL="https://webshare.techbg.net/installer"
 fi
 
-# Set installation path (default: /var/www/webshare)
-WEBROOT="${INSTALL_PATH:-/var/www/webshare}"
+# Set installation path (default: current directory)
+WEBROOT="${INSTALL_PATH:-$(pwd)}"
 SRC_DIR="$WEBROOT/src"
 
 echo -e "  Path:   ${GREEN}${WEBROOT}${NC}"
