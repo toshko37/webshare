@@ -1,16 +1,14 @@
 #!/bin/bash
 #
-# WebShare Quick Installer v3.0
+# WebShare Quick Installer v3.1
 # =============================
 # One-line installer for WebShare
 #
 # Usage:
-#   curl -fsSL https://webshare.techbg.net/get | bash
-#   curl -fsSL https://webshare.techbg.net/get | bash -s -- domain.com [user] [pass]
-#   curl -fsSL https://webshare.techbg.net/get | bash -s -- --source dev domain.com
-#
-# Options:
-#   --source github|dev  - Choose update source (default: github)
+#   curl -fsSL https://webshare.techbg.net/get | sudo bash
+#   curl -fsSL https://webshare.techbg.net/get | sudo bash -s -- domain.com
+#   curl -fsSL https://webshare.techbg.net/get | sudo bash -s -- domain.com admin mypass
+#   curl -fsSL https://webshare.techbg.net/get | sudo bash -s -- --source dev domain.com
 #
 
 set -e
@@ -29,7 +27,7 @@ echo '╦ ╦┌─┐┌┐ ╔═╗┬ ┬┌─┐┬─┐┌─┐'
 echo '║║║├┤ ├┴┐╚═╗├─┤├─┤├┬┘├┤ '
 echo '╚╩╝└─┘└─┘╚═╝┴ ┴┴ ┴┴└─└─┘'
 echo -e "${NC}"
-echo -e "${BLUE}Quick Installer v3.0${NC}"
+echo -e "${BLUE}Quick Installer v3.1${NC}"
 echo ""
 
 # Check root
@@ -52,6 +50,7 @@ SOURCE="github"
 DOMAIN=""
 ADMIN_USER="admin"
 ADMIN_PASS=""
+ARG_INDEX=0
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -64,13 +63,12 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         *)
-            if [ -z "$DOMAIN" ]; then
-                DOMAIN="$1"
-            elif [ "$ADMIN_USER" = "admin" ]; then
-                ADMIN_USER="$1"
-            elif [ -z "$ADMIN_PASS" ]; then
-                ADMIN_PASS="$1"
-            fi
+            ARG_INDEX=$((ARG_INDEX + 1))
+            case $ARG_INDEX in
+                1) DOMAIN="$1" ;;
+                2) ADMIN_USER="$1" ;;
+                3) ADMIN_PASS="$1" ;;
+            esac
             shift
             ;;
     esac
@@ -112,11 +110,14 @@ echo ""
 # Set source URL
 if [ "$SOURCE" = "github" ]; then
     SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/src"
+    INSTALLER_URL="https://raw.githubusercontent.com/toshko37/webshare/main/installer"
 else
     SOURCE_URL="https://webshare.techbg.net/src"
+    INSTALLER_URL="https://webshare.techbg.net/installer"
 fi
 
 WEBROOT="/var/www/webshare"
+SRC_DIR="$WEBROOT/src"
 
 # ============================================
 # 1. Install dependencies
@@ -144,12 +145,17 @@ echo -e "${GREEN}Apache configured${NC}"
 # 3. Create directory structure
 # ============================================
 echo -e "${BLUE}[3/8]${NC} Creating directories..."
-mkdir -p "$WEBROOT/files" "$WEBROOT/texts" "$WEBROOT/backups" "$WEBROOT/assets/quill"
+
+# Root directories (data)
+mkdir -p "$WEBROOT/files" "$WEBROOT/texts" "$WEBROOT/backups" "$WEBROOT/installer"
+
+# Source directory
+mkdir -p "$SRC_DIR/assets/quill" "$SRC_DIR/docs"
 
 echo -e "${GREEN}Directories created${NC}"
 
 # ============================================
-# 4. Download source files
+# 4. Download source files to src/
 # ============================================
 echo -e "${BLUE}[4/8]${NC} Downloading WebShare files..."
 
@@ -160,46 +166,84 @@ PHP_FILES=(
     "user-management.php" "html-sanitizer.php" "smtp-mailer.php"
     "send-mail.php" "web-download.php" "api-upload.php"
     "api-scripts.php" "check-version.php" "do-update.php"
-    "live-update.php" "p.php" "u.php" "get.php"
-    "get-speedtest.php" "security-headers.php" "f.php"
+    "live-update.php" "p.php" "u.php" "f.php" "get.php"
+    "get-speedtest.php" "get-update.php" "get-update-script.php"
+    "security-headers.php"
 )
 
 OTHER_FILES=(
     "favicon.ico" "favicon.svg" "apple-touch-icon.png"
-    "CHANGELOG.md" "README.md" "README-BG.md" "version.json"
+    "CHANGELOG.md" "version.json"
 )
 
-# Download PHP files
+# Download PHP files to src/
 for file in "${PHP_FILES[@]}"; do
-    curl -fsSL "$SOURCE_URL/$file" -o "$WEBROOT/$file" 2>/dev/null || true
+    curl -fsSL "$SOURCE_URL/$file" -o "$SRC_DIR/$file" 2>/dev/null || true
 done
 
-# Download other files
+# Download other files to src/
 for file in "${OTHER_FILES[@]}"; do
-    curl -fsSL "$SOURCE_URL/$file" -o "$WEBROOT/$file" 2>/dev/null || true
+    curl -fsSL "$SOURCE_URL/$file" -o "$SRC_DIR/$file" 2>/dev/null || true
 done
 
-# Download .htaccess
-curl -fsSL "$SOURCE_URL/.htaccess" -o "$WEBROOT/.htaccess" 2>/dev/null || true
+# Download .htaccess to src/
+curl -fsSL "$SOURCE_URL/.htaccess" -o "$SRC_DIR/.htaccess" 2>/dev/null || true
+
+# Download .user.ini to src/
+curl -fsSL "$SOURCE_URL/.user.ini" -o "$SRC_DIR/.user.ini" 2>/dev/null || {
+    cat > "$SRC_DIR/.user.ini" << 'PHPINI'
+; WebShare PHP Settings
+upload_max_filesize = 10G
+post_max_size = 10G
+max_execution_time = 7200
+max_input_time = 7200
+memory_limit = 512M
+PHPINI
+}
 
 # Download Quill.js assets
-curl -fsSL "$SOURCE_URL/assets/quill/quill.js" -o "$WEBROOT/assets/quill/quill.js" 2>/dev/null || true
-curl -fsSL "$SOURCE_URL/assets/quill/quill.snow.css" -o "$WEBROOT/assets/quill/quill.snow.css" 2>/dev/null || true
+curl -fsSL "$SOURCE_URL/assets/quill/quill.js" -o "$SRC_DIR/assets/quill/quill.js" 2>/dev/null || true
+curl -fsSL "$SOURCE_URL/assets/quill/quill.snow.css" -o "$SRC_DIR/assets/quill/quill.snow.css" 2>/dev/null || true
 
-# Download update script
-curl -fsSL "https://raw.githubusercontent.com/toshko37/webshare/main/installer/update.sh" -o "$WEBROOT/update.sh" 2>/dev/null || \
-curl -fsSL "https://webshare.techbg.net/installer/update.sh" -o "$WEBROOT/update.sh" 2>/dev/null || true
-chmod +x "$WEBROOT/update.sh" 2>/dev/null || true
+# Download installer scripts
+curl -fsSL "$INSTALLER_URL/update.sh" -o "$WEBROOT/installer/update.sh" 2>/dev/null || true
+curl -fsSL "$INSTALLER_URL/install.sh" -o "$WEBROOT/installer/install.sh" 2>/dev/null || true
+chmod +x "$WEBROOT/installer"/*.sh 2>/dev/null || true
 
 # Fix .htaccess path
-sed -i "s|AuthUserFile .*/\.htpasswd|AuthUserFile $WEBROOT/.htpasswd|g" "$WEBROOT/.htaccess" 2>/dev/null || true
+sed -i "s|AuthUserFile .*/\.htpasswd|AuthUserFile $WEBROOT/.htpasswd|g" "$SRC_DIR/.htaccess" 2>/dev/null || true
 
 echo -e "${GREEN}Files downloaded${NC}"
 
 # ============================================
-# 5. Create config files
+# 5. Create symlinks in src/ for data access
 # ============================================
-echo -e "${BLUE}[5/8]${NC} Creating configuration..."
+echo -e "${BLUE}[5/8]${NC} Creating symlinks and configuration..."
+
+cd "$SRC_DIR"
+
+# Symlinks to data directories
+ln -sf ../files files 2>/dev/null || true
+ln -sf ../texts texts 2>/dev/null || true
+ln -sf ../backups backups 2>/dev/null || true
+
+# Symlinks to config files
+ln -sf ../.htpasswd .htpasswd 2>/dev/null || true
+ln -sf ../.config.json .config.json 2>/dev/null || true
+ln -sf ../.geo.json .geo.json 2>/dev/null || true
+ln -sf ../.audit.json .audit.json 2>/dev/null || true
+ln -sf ../.tokens.json .tokens.json 2>/dev/null || true
+ln -sf ../.texts.json .texts.json 2>/dev/null || true
+ln -sf ../.files-meta.json .files-meta.json 2>/dev/null || true
+ln -sf ../.folder-shares.json .folder-shares.json 2>/dev/null || true
+ln -sf ../.api-keys.json .api-keys.json 2>/dev/null || true
+ln -sf ../.encryption-keys.json .encryption-keys.json 2>/dev/null || true
+ln -sf ../.mail-ratelimit.json .mail-ratelimit.json 2>/dev/null || true
+ln -sf ../.update-config.json .update-config.json 2>/dev/null || true
+ln -sf ../.version-check.json .version-check.json 2>/dev/null || true
+ln -sf ../GeoLite2-Country.mmdb GeoLite2-Country.mmdb 2>/dev/null || true
+
+cd "$WEBROOT"
 
 # Security .htaccess for files/
 cat > "$WEBROOT/files/.htaccess" << 'HTEOF'
@@ -220,15 +264,17 @@ HTEOF
 # .htpasswd
 htpasswd -cb "$WEBROOT/.htpasswd" "$ADMIN_USER" "$ADMIN_PASS" > /dev/null 2>&1
 
-# Config files
+# Config files in root
 echo '{"enabled":false,"allowed_countries":["BG"],"blocked_countries":[]}' > "$WEBROOT/.geo.json"
-echo '{"mail_enabled":false,"smtp_host":"","smtp_port":587,"smtp_user":"","smtp_pass":"","smtp_encryption":"tls","mail_from":""}' > "$WEBROOT/.config.json"
+echo '{"mail_enabled":false}' > "$WEBROOT/.config.json"
 echo '{}' > "$WEBROOT/.files-meta.json"
 echo '{}' > "$WEBROOT/.texts.json"
 echo '{}' > "$WEBROOT/.tokens.json"
-echo '{}' > "$WEBROOT/.audit.json"
+echo '[]' > "$WEBROOT/.audit.json"
 echo '[]' > "$WEBROOT/.api-keys.json"
 echo '{}' > "$WEBROOT/.mail-ratelimit.json"
+echo '{}' > "$WEBROOT/.folder-shares.json"
+echo '{}' > "$WEBROOT/.encryption-keys.json"
 
 # Update source config
 cat > "$WEBROOT/.update-config.json" << UPDATECONF
@@ -237,17 +283,7 @@ cat > "$WEBROOT/.update-config.json" << UPDATECONF
 }
 UPDATECONF
 
-# PHP config
-cat > "$WEBROOT/.user.ini" << 'PHPINI'
-; WebShare PHP Settings
-upload_max_filesize = 10G
-post_max_size = 10G
-max_execution_time = 7200
-max_input_time = 7200
-memory_limit = 512M
-PHPINI
-
-echo -e "${GREEN}Configuration created${NC}"
+echo -e "${GREEN}Symlinks and configuration created${NC}"
 
 # ============================================
 # 6. Set permissions
@@ -255,9 +291,11 @@ echo -e "${GREEN}Configuration created${NC}"
 echo -e "${BLUE}[6/8]${NC} Setting permissions..."
 
 chown -R www-data:www-data "$WEBROOT"
-chmod 600 "$WEBROOT/.htpasswd" "$WEBROOT/.api-keys.json" "$WEBROOT/.tokens.json"
+chmod 600 "$WEBROOT/.htpasswd" "$WEBROOT/.api-keys.json" "$WEBROOT/.tokens.json" "$WEBROOT/.encryption-keys.json"
 chmod 644 "$WEBROOT/.geo.json" "$WEBROOT/.config.json" "$WEBROOT/.files-meta.json" "$WEBROOT/.texts.json" "$WEBROOT/.audit.json" "$WEBROOT/.mail-ratelimit.json"
 chmod 750 "$WEBROOT/files" "$WEBROOT/texts"
+chmod 755 "$SRC_DIR"
+chmod 644 "$SRC_DIR"/*.php 2>/dev/null || true
 
 echo -e "${GREEN}Permissions set${NC}"
 
@@ -267,14 +305,19 @@ echo -e "${GREEN}Permissions set${NC}"
 echo -e "${BLUE}[7/8]${NC} Configuring virtual host..."
 
 cat > "/etc/apache2/sites-available/webshare.conf" << VHEOF
+# WebShare - ${DOMAIN}
 <VirtualHost *:80>
     ServerName ${DOMAIN}
-    DocumentRoot ${WEBROOT}
+    DocumentRoot ${SRC_DIR}
 
-    <Directory ${WEBROOT}>
+    <Directory ${SRC_DIR}>
+        Options -Indexes +FollowSymLinks
         AllowOverride All
         Require all granted
     </Directory>
+
+    # Backward compatibility for old update URLs
+    Alias /installer/src ${SRC_DIR}
 
     ErrorLog \${APACHE_LOG_DIR}/webshare_error.log
     CustomLog \${APACHE_LOG_DIR}/webshare_access.log combined
@@ -282,6 +325,7 @@ cat > "/etc/apache2/sites-available/webshare.conf" << VHEOF
 VHEOF
 
 a2ensite webshare.conf > /dev/null 2>&1
+a2dissite 000-default.conf > /dev/null 2>&1 || true
 systemctl reload apache2
 
 echo -e "${GREEN}Virtual host configured${NC}"
@@ -327,6 +371,10 @@ echo ""
 echo -e "  ${CYAN}Admin User:${NC}    ${ADMIN_USER}"
 echo -e "  ${CYAN}Update Source:${NC} ${SOURCE}"
 echo ""
-echo -e "To update: ${YELLOW}cd $WEBROOT && ./update.sh${NC}"
+echo -e "Directory structure:"
+echo -e "  Root:   ${WEBROOT}/"
+echo -e "  Source: ${WEBROOT}/src/"
+echo -e "  Files:  ${WEBROOT}/files/"
 echo ""
-echo -e "${BLUE}Enjoy! ${NC}"
+echo -e "To update: ${YELLOW}${WEBROOT}/installer/update.sh${NC}"
+echo ""
