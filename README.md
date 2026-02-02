@@ -2,7 +2,7 @@
 
 **WebShare** is a simple, self-hosted file sharing application with multi-user support, folder organization, file encryption, and one-click updates.
 
-![Version](https://img.shields.io/badge/version-3.5.2-green)
+![Version](https://img.shields.io/badge/version-3.5.3-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![PHP](https://img.shields.io/badge/PHP-7.4%2B-purple)
 
@@ -21,9 +21,25 @@
 
 ### One-liner (Debian/Ubuntu)
 
+**Interactive** (will prompt for domain and password):
 ```bash
 curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/get-webshare.sh | sudo bash
 ```
+
+**With domain only** (will prompt for password):
+```bash
+curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/get-webshare.sh | sudo bash -s -- example.com
+```
+
+**Fully automated** (no prompts):
+```bash
+curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/get-webshare.sh | sudo bash -s -- example.com admin MySecurePass123
+```
+
+Parameters: `domain [username] [password]`
+- `domain` - Your domain name (required)
+- `username` - Admin username (default: admin)
+- `password` - Admin password (required if not interactive)
 
 ### Manual Install
 

@@ -1,6 +1,6 @@
 {
-    "version": "3.5.2",
+    "version": "3.5.3",
     "released": "2026-02-02",
-    "changelog": "Fixed update system paths for GitHub and dev sources, Apache vhost path checking",
+    "changelog": "Fixed installer symlink creation, preserve existing config on reinstall",
     "download_url": "https://webshare.techbg.net/"
 }

@@ -2,6 +2,21 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.5.3] - 2026-02-02
+
+### Installer Fixes
+- **Preserve existing config files** - Reinstalling no longer overwrites:
+  - `.htpasswd` - Keeps existing users and passwords
+  - `.config.json`, `.geo.json`, etc. - Keeps all settings
+- **Fixed symlink creation** - Symlinks now created only in `src/`, not in data directories
+- **Updated README** - Added examples for fully automated installation
+
+### Documentation
+- Added installation parameters documentation to README:
+  - `domain` - Required domain name
+  - `username` - Admin username (default: admin)
+  - `password` - Admin password
+
 ## [3.5.2] - 2026-02-02
 
 ### Update System Fixes
