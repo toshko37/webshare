@@ -2,7 +2,7 @@
 
 **WebShare** is a simple, self-hosted file sharing application with multi-user support, folder organization, file encryption, and one-click updates.
 
-![Version](https://img.shields.io/badge/version-3.5.0-green)
+![Version](https://img.shields.io/badge/version-3.5.1-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![PHP](https://img.shields.io/badge/PHP-7.4%2B-purple)
 
@@ -22,7 +22,7 @@
 ### One-liner (Debian/Ubuntu)
 
 ```bash
-curl -fsSL https://webshare.techbg.net/get | sudo bash
+curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/get-webshare.sh | sudo bash
 ```
 
 ### Manual Install

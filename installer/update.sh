@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# WebShare Update Script v3.1
+# WebShare Update Script v3.2
 # ===========================
 # Downloads updates from GitHub (stable) or dev server
 # Supports both old (root) and new (src/) directory structures
@@ -22,23 +22,17 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-# Detect installation directory and structure
+# Detect installation directory
 detect_install_dir() {
     # Check various locations
     if [ -n "$INSTALL_DIR" ]; then
         # Use environment variable
         :
     elif [ -f "$(dirname "$0")/../src/index.php" ]; then
-        # New structure - script in installer/, src/ has files
+        # Script in installer/, src/ has files
         INSTALL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-    elif [ -f "$(dirname "$0")/index.php" ]; then
-        # Old structure - script and files in same dir
-        INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
     elif [ -f "/var/www/webshare/src/index.php" ]; then
-        # Default location with new structure
-        INSTALL_DIR="/var/www/webshare"
-    elif [ -f "/var/www/webshare/index.php" ]; then
-        # Default location with old structure
+        # Default location
         INSTALL_DIR="/var/www/webshare"
     else
         echo -e "${RED}Error: Cannot determine installation directory${NC}"
@@ -46,13 +40,13 @@ detect_install_dir() {
         exit 1
     fi
 
-    # Detect structure type
-    if [ -d "$INSTALL_DIR/src" ] && [ -f "$INSTALL_DIR/src/index.php" ]; then
-        STRUCTURE="new"
-        SRC_DIR="$INSTALL_DIR/src"
-    else
-        STRUCTURE="old"
-        SRC_DIR="$INSTALL_DIR"
+    SRC_DIR="$INSTALL_DIR/src"
+
+    # Verify src directory exists
+    if [ ! -d "$SRC_DIR" ]; then
+        echo -e "${RED}Error: src/ directory not found${NC}"
+        echo "Expected: $SRC_DIR"
+        exit 1
     fi
 }
 
@@ -114,10 +108,10 @@ echo -e "${CYAN}╦ ╦┌─┐┌┐ ╔═╗┬ ┬┌─┐┬─┐┌─�
 echo -e "${CYAN}║║║├┤ ├┴┐╚═╗├─┤├─┤├┬┘├┤ ${NC}"
 echo -e "${CYAN}╚╩╝└─┘└─┘╚═╝┴ ┴┴ ┴┴└─└─┘${NC}"
 echo ""
-echo -e "${BLUE}Update Script v3.1${NC}"
+echo -e "${BLUE}Update Script v3.2${NC}"
 echo -e "Source: ${GREEN}$SOURCE_NAME${NC}"
 echo -e "Install: ${CYAN}$INSTALL_DIR${NC}"
-echo -e "Structure: ${CYAN}$STRUCTURE${NC} (files in ${SRC_DIR})"
+echo -e "Source:  ${CYAN}$SRC_DIR${NC}"
 echo ""
 
 # Get current version
@@ -143,15 +137,6 @@ if [ -n "$LATEST_VERSION" ]; then
 else
     echo -e "${YELLOW}Unable to check${NC}"
     LATEST_VERSION="$CURRENT_VERSION"
-fi
-
-# Migration notice
-if [ "$STRUCTURE" = "old" ]; then
-    echo ""
-    echo -e "${YELLOW}╔══════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${YELLOW}║  MIGRATION: Old structure detected!                      ║${NC}"
-    echo -e "${YELLOW}║  Files will be moved to src/ subdirectory               ║${NC}"
-    echo -e "${YELLOW}╚══════════════════════════════════════════════════════════╝${NC}"
 fi
 
 echo ""
@@ -197,12 +182,6 @@ cp "$INSTALL_DIR"/.config.json "$BACKUP_DIR"/ 2>/dev/null || true
 cp "$INSTALL_DIR"/.geo.json "$BACKUP_DIR"/ 2>/dev/null || true
 cp "$INSTALL_DIR"/.update-config.json "$BACKUP_DIR"/ 2>/dev/null || true
 
-# Also from src if old structure
-if [ "$STRUCTURE" = "old" ]; then
-    cp "$SRC_DIR"/.htaccess "$BACKUP_DIR"/ 2>/dev/null || true
-    cp "$SRC_DIR"/.user.ini "$BACKUP_DIR"/ 2>/dev/null || true
-fi
-
 echo -e "${GREEN}Backup created: $BACKUP_DIR${NC}"
 
 # Cleanup old backups - keep only last 2
@@ -220,59 +199,12 @@ else
     echo -e "${GREEN}none to remove${NC}"
 fi
 
-# Step 2: Create new structure if needed
-if [ "$STRUCTURE" = "old" ]; then
-    echo ""
-    echo -e "${BLUE}[2/7] Migrating to new structure...${NC}"
-
-    # Create src directory
-    mkdir -p "$INSTALL_DIR/src"
-    mkdir -p "$INSTALL_DIR/src/assets"
-    mkdir -p "$INSTALL_DIR/src/docs"
-
-    # Move PHP files to src/
-    echo -n "  Moving PHP files... "
-    for phpfile in "$INSTALL_DIR"/*.php; do
-        [ -f "$phpfile" ] && mv "$phpfile" "$INSTALL_DIR/src/" 2>/dev/null || true
-    done
-    echo -e "${GREEN}done${NC}"
-
-    # Move assets
-    if [ -d "$INSTALL_DIR/assets" ]; then
-        echo -n "  Moving assets... "
-        cp -r "$INSTALL_DIR/assets"/* "$INSTALL_DIR/src/assets/" 2>/dev/null || true
-        rm -rf "$INSTALL_DIR/assets"
-        echo -e "${GREEN}done${NC}"
-    fi
-
-    # Move docs
-    if [ -d "$INSTALL_DIR/docs" ]; then
-        echo -n "  Moving docs... "
-        cp -r "$INSTALL_DIR/docs"/* "$INSTALL_DIR/src/docs/" 2>/dev/null || true
-        rm -rf "$INSTALL_DIR/docs"
-        echo -e "${GREEN}done${NC}"
-    fi
-
-    # Move favicon files
-    echo -n "  Moving favicon files... "
-    for favicon in favicon.ico favicon.svg apple-touch-icon.png; do
-        [ -f "$INSTALL_DIR/$favicon" ] && mv "$INSTALL_DIR/$favicon" "$INSTALL_DIR/src/" 2>/dev/null || true
-    done
-    echo -e "${GREEN}done${NC}"
-
-    # Move .htaccess and .user.ini to src
-    [ -f "$INSTALL_DIR/.htaccess" ] && mv "$INSTALL_DIR/.htaccess" "$INSTALL_DIR/src/" 2>/dev/null || true
-    [ -f "$INSTALL_DIR/.user.ini" ] && mv "$INSTALL_DIR/.user.ini" "$INSTALL_DIR/src/" 2>/dev/null || true
-
-    # Update SRC_DIR
-    SRC_DIR="$INSTALL_DIR/src"
-    STRUCTURE="new"
-
-    echo -e "${GREEN}Migration complete${NC}"
-else
-    echo ""
-    echo -e "${BLUE}[2/7] Structure OK (already using src/)${NC}"
-fi
+# Step 2: Verify structure
+echo ""
+echo -e "${BLUE}[2/7] Verifying structure...${NC}"
+mkdir -p "$SRC_DIR/assets/quill"
+mkdir -p "$SRC_DIR/docs"
+echo -e "${GREEN}Structure OK${NC}"
 
 # Step 3: Create symlinks in src/ for data access
 echo ""

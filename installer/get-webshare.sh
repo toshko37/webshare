@@ -1,13 +1,15 @@
 #!/bin/bash
 #
-# WebShare Quick Installer v3.1
+# WebShare Quick Installer v3.2
 # =============================
 # One-line installer for WebShare
 #
-# Usage:
-#   curl -fsSL https://webshare.techbg.net/get | sudo bash
-#   curl -fsSL https://webshare.techbg.net/get | sudo bash -s -- domain.com
-#   curl -fsSL https://webshare.techbg.net/get | sudo bash -s -- domain.com admin mypass
+# Usage (from GitHub - stable):
+#   curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/get-webshare.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/get-webshare.sh | sudo bash -s -- domain.com
+#   curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/get-webshare.sh | sudo bash -s -- domain.com admin mypass
+#
+# Usage (from dev server):
 #   curl -fsSL https://webshare.techbg.net/get | sudo bash -s -- --source dev domain.com
 #
 
@@ -27,7 +29,7 @@ echo '╦ ╦┌─┐┌┐ ╔═╗┬ ┬┌─┐┬─┐┌─┐'
 echo '║║║├┤ ├┴┐╚═╗├─┤├─┤├┬┘├┤ '
 echo '╚╩╝└─┘└─┘╚═╝┴ ┴┴ ┴┴└─└─┘'
 echo -e "${NC}"
-echo -e "${BLUE}Quick Installer v3.1${NC}"
+echo -e "${BLUE}Quick Installer v3.2${NC}"
 echo ""
 
 # Check root
@@ -35,7 +37,7 @@ if [ "$EUID" -ne 0 ]; then
     echo -e "${RED}Error: Please run as root (sudo)${NC}"
     echo ""
     echo "Usage:"
-    echo "  curl -fsSL https://webshare.techbg.net/get | sudo bash"
+    echo "  curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/get-webshare.sh | sudo bash"
     exit 1
 fi
 

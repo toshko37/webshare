@@ -48,7 +48,7 @@ htpasswd -c .htpasswd admin
 ### Option 2: Remote Install
 
 ```bash
-curl -fsSL https://webshare.techbg.net/get | sudo bash -s -- your-domain.com
+curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/get-webshare.sh | sudo bash -s -- your-domain.com
 ```
 
 ### Option 3: Manual Setup
