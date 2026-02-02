@@ -5141,8 +5141,8 @@ systemctl reload apache2</code>
             }
 
             const savedTab = localStorage.getItem('activeTab');
-            // Only restore 'texts' tab, always default to 'files' for others
-            if (savedTab === 'texts') {
+            // Restore 'texts' and 'help' tabs, default to 'files' for others
+            if (savedTab === 'texts' || savedTab === 'help') {
                 const tabElement = document.getElementById(savedTab + '-tab');
                 if (tabElement) {
                     switchTab(savedTab);
