@@ -5,6 +5,7 @@
  * Sends file share links to specified email addresses
  */
 
+require_once __DIR__ . '/security-check.php';
 session_start();
 header('Content-Type: application/json');
 

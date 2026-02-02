@@ -8,6 +8,7 @@
  * { "stable": false } - Check webshare.techbg.net/version.json (for testing)
  */
 
+require_once __DIR__ . '/security-check.php';
 header('Content-Type: application/json');
 
 // Get current version from index.php (single source of truth)

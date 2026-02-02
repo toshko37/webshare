@@ -5,6 +5,8 @@
  * Downloads files from external URLs directly to the server
  */
 
+require_once __DIR__ . '/security-check.php';
+
 // Error handling
 set_error_handler(function($errno, $errstr) {
     echo json_encode(['success' => false, 'error' => 'PHP Error: ' . $errstr]);

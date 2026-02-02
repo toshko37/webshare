@@ -4,6 +4,9 @@
 
 define('WEBSHARE_VERSION', '3.5.3');
 
+// Critical security check - .htaccess must exist
+require_once __DIR__ . '/security-check.php';
+
 // Security headers
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: SAMEORIGIN');

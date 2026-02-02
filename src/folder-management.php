@@ -5,6 +5,8 @@
  * Handles user folders, permissions, and file operations between folders
  */
 
+require_once __DIR__ . '/security-check.php';
+
 define('FILES_BASE_DIR', __DIR__ . '/files/');
 define('PUBLIC_FOLDER', '_public');
 define('MAX_SUBFOLDER_DEPTH', 3); // Maximum folder nesting level

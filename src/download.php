@@ -2,6 +2,9 @@
 // Download file handler
 // ====================
 
+// Security check
+require_once __DIR__ . '/security-check.php';
+
 // Include required files
 require_once __DIR__ . '/audit-log.php';
 require_once __DIR__ . '/user-management.php';

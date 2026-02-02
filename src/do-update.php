@@ -4,6 +4,7 @@
  * Downloads and installs updates from GitHub releases
  */
 
+require_once __DIR__ . '/security-check.php';
 session_start();
 header('Content-Type: application/json');
 

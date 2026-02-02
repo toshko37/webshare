@@ -5,6 +5,8 @@
  * Same source as the shell update script
  */
 
+require_once __DIR__ . '/security-check.php';
+
 // Prevent any output before JSON
 ob_start();
 error_reporting(E_ALL);
