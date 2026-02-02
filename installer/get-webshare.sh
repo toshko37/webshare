@@ -272,22 +272,27 @@ cat > "$WEBROOT/texts/.htaccess" << 'HTEOF'
 Require all denied
 HTEOF
 
-# .htpasswd
-htpasswd -cb "$WEBROOT/.htpasswd" "$ADMIN_USER" "$ADMIN_PASS" > /dev/null 2>&1
+# .htpasswd - only create if doesn't exist
+if [ ! -f "$WEBROOT/.htpasswd" ]; then
+    htpasswd -cb "$WEBROOT/.htpasswd" "$ADMIN_USER" "$ADMIN_PASS" > /dev/null 2>&1
+    echo -e "  ${GREEN}Created new .htpasswd${NC}"
+else
+    echo -e "  ${YELLOW}Preserved existing .htpasswd${NC}"
+fi
 
-# Config files in root
-echo '{"enabled":false,"allowed_countries":["BG"],"blocked_countries":[]}' > "$WEBROOT/.geo.json"
-echo '{"mail_enabled":false}' > "$WEBROOT/.config.json"
-echo '{}' > "$WEBROOT/.files-meta.json"
-echo '{}' > "$WEBROOT/.texts.json"
-echo '{}' > "$WEBROOT/.tokens.json"
-echo '[]' > "$WEBROOT/.audit.json"
-echo '[]' > "$WEBROOT/.api-keys.json"
-echo '{}' > "$WEBROOT/.mail-ratelimit.json"
-echo '{}' > "$WEBROOT/.folder-shares.json"
-echo '{}' > "$WEBROOT/.encryption-keys.json"
+# Config files in root - only create if don't exist
+[ -f "$WEBROOT/.geo.json" ] || echo '{"enabled":false,"allowed_countries":["BG"],"blocked_countries":[]}' > "$WEBROOT/.geo.json"
+[ -f "$WEBROOT/.config.json" ] || echo '{"mail_enabled":false}' > "$WEBROOT/.config.json"
+[ -f "$WEBROOT/.files-meta.json" ] || echo '{}' > "$WEBROOT/.files-meta.json"
+[ -f "$WEBROOT/.texts.json" ] || echo '{}' > "$WEBROOT/.texts.json"
+[ -f "$WEBROOT/.tokens.json" ] || echo '{}' > "$WEBROOT/.tokens.json"
+[ -f "$WEBROOT/.audit.json" ] || echo '[]' > "$WEBROOT/.audit.json"
+[ -f "$WEBROOT/.api-keys.json" ] || echo '[]' > "$WEBROOT/.api-keys.json"
+[ -f "$WEBROOT/.mail-ratelimit.json" ] || echo '{}' > "$WEBROOT/.mail-ratelimit.json"
+[ -f "$WEBROOT/.folder-shares.json" ] || echo '{}' > "$WEBROOT/.folder-shares.json"
+[ -f "$WEBROOT/.encryption-keys.json" ] || echo '{}' > "$WEBROOT/.encryption-keys.json"
 
-# Update source config
+# Update source config - always update this one
 cat > "$WEBROOT/.update-config.json" << UPDATECONF
 {
     "stable": $([ "$SOURCE" = "github" ] && echo "true" || echo "false")
