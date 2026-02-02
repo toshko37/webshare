@@ -1,6 +1,6 @@
 {
-    "version": "3.5.1",
-    "released": "2026-02-01",
-    "changelog": "Project restructuring (src/ folder), audit log rotation, chat UI buttons, Apache config update, automatic migration",
-    "download_url": "https://webshare.techbg.net/src/"
+    "version": "3.5.2",
+    "released": "2026-02-02",
+    "changelog": "Fixed update system paths for GitHub and dev sources, Apache vhost path checking",
+    "download_url": "https://webshare.techbg.net/"
 }

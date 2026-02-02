@@ -35,7 +35,7 @@ if (file_exists($configFile)) {
 }
 
 $githubRepo = 'toshko37/webshare';
-$devVersionUrl = 'https://webshare.techbg.net/src/version.json';
+$devVersionUrl = 'https://webshare.techbg.net/version.json';
 
 // Check if we should use cache
 $useCache = true;

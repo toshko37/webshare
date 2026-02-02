@@ -2,6 +2,29 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.5.2] - 2026-02-02
+
+### Update System Fixes
+- **Fixed dev server URLs** - Removed incorrect `/src/` path from dev server URLs
+  - Dev server DocumentRoot is already `src/`, so URLs don't need `/src/` prefix
+  - GitHub uses `/src/` in path, dev server doesn't
+- **Created htaccess.txt and user.ini.txt** - Public accessible versions for updates
+  - `.htaccess` is protected, so dev server serves `htaccess.txt` instead
+  - Install scripts automatically rename and configure paths
+- **Apache vhost path checking** - Install script now detects and fixes wrong DocumentRoot paths
+- **Removed migration code** - Old structure migration code removed (no longer needed)
+
+### Files Changed
+- `live-update.php` - Correct URLs for dev vs GitHub sources
+- `check-version.php` - Fixed dev server version check URL
+- All installer scripts - Fixed source URLs and htaccess handling
+
+## [3.5.1] - 2026-02-01
+
+### Fixes
+- Help tab now restores after page reload
+- Git commit author configured
+
 ## [3.5.0] - 2026-02-01
 
 ### Project Restructuring
@@ -15,7 +38,7 @@ All notable changes to WebShare will be documented in this file.
 ### Update System
 - **Dual update sources** - Choose between stable and development servers
   - GitHub (stable): `https://raw.githubusercontent.com/toshko37/webshare/main/src/`
-  - Dev server: `https://webshare.techbg.net/src/`
+  - Dev server: `https://webshare.techbg.net/`
   - Configure via `--source github|dev` flag or `.update-config.json`
 - **Automatic migration** - Update script detects old structure and migrates
   - Moves PHP files to src/

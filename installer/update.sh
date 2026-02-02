@@ -98,7 +98,7 @@ if [ "$USE_STABLE" = "true" ]; then
     SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/src"
     SOURCE_NAME="GitHub (stable)"
 else
-    SOURCE_URL="https://webshare.techbg.net/src"
+    SOURCE_URL="https://webshare.techbg.net"
     SOURCE_NAME="Dev server"
 fi
 

@@ -19,7 +19,7 @@ NC='\033[0m'
 INSTALL_DIR="${INSTALL_DIR:-/var/www/webshare}"
 SRC_DIR="$INSTALL_DIR/src"
 BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
-SOURCE_URL="https://webshare.techbg.net/src"
+SOURCE_URL="https://webshare.techbg.net"
 AUTO_CONFIRM=false
 
 # Parse arguments

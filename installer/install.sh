@@ -439,7 +439,7 @@ if [ "$SOURCE" = "github" ]; then
     SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/src"
     INSTALLER_URL="https://raw.githubusercontent.com/toshko37/webshare/main/installer"
 else
-    SOURCE_URL="https://webshare.techbg.net/src"
+    SOURCE_URL="https://webshare.techbg.net"
     INSTALLER_URL="https://webshare.techbg.net/installer"
 fi
 

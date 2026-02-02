@@ -74,8 +74,8 @@ AuthUserFile /var/www/webshare/.htpasswd
     Require valid-user
 </FilesMatch>
 
-# Non-PHP files that need protection (except version.json)
-<FilesMatch "^(?!version\.json$).*\.(json|html|htm|txt)$">
+# Non-PHP files that need protection (except public files)
+<FilesMatch "^(?!version\.json$|htaccess\.txt$|user\.ini\.txt$).*\.(json|html|htm|txt)$">
     Require valid-user
 </FilesMatch>
 

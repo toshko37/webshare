@@ -82,7 +82,7 @@ AuthUserFile __HTPASSWD_PATH__
     Require valid-user
 </FilesMatch>
 
-# Non-PHP files that need protection (except version.json, htaccess.txt, user.ini.txt)
+# Non-PHP files that need protection (except public files)
 <FilesMatch "^(?!version\.json$|htaccess\.txt$|user\.ini\.txt$).*\.(json|html|htm|txt)$">
     Require valid-user
 </FilesMatch>

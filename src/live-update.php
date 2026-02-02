@@ -74,7 +74,7 @@ if ($config['stable']) {
     $sourceUrl = 'https://raw.githubusercontent.com/toshko37/webshare/main/src';
 } else {
     // Dev server
-    $sourceUrl = 'https://webshare.techbg.net/src';
+    $sourceUrl = 'https://webshare.techbg.net';
 }
 
 // Files to update (same list as update.sh)
