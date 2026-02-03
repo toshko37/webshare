@@ -271,9 +271,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'post' && !empty($token
 
     saveConversation($jsonPath, $conversation);
 
-    // Update metadata
+    // Update metadata and reset expiration to 24h from now
     $metadata[$token]['message_count'] = count($conversation['messages']);
     $metadata[$token]['last_activity'] = $now;
+    $metadata[$token]['expires'] = $now + (TEXT_EXPIRE_HOURS * 3600); // Reset to 24h
     saveMetadata($metadataFile, $metadata);
 
     writeAuditLog('chat_message', "Message in conversation: $token by $author", 'anonymous');
@@ -995,6 +996,33 @@ if ($isViewMode) {
             background: #ddd;
         }
 
+        .copy-btn {
+            position: absolute;
+            bottom: 4px;
+            right: 6px;
+            width: 20px;
+            height: 20px;
+            padding: 0;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            opacity: 0.4;
+            font-size: 12px;
+            transition: opacity 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .copy-btn:hover {
+            opacity: 0.8;
+        }
+
+        .copy-btn.copied {
+            opacity: 1;
+            color: #22c55e;
+        }
+
         .chat-input {
             background: white;
             border-top: 1px solid #ddd;
@@ -1125,27 +1153,6 @@ if ($isViewMode) {
             transform: none;
         }
 
-        .speedtest-link {
-            position: fixed;
-            bottom: 15px;
-            right: 15px;
-            background: rgba(255,255,255,0.95);
-            padding: 10px 18px;
-            border-radius: 25px;
-            box-shadow: 0 2px 15px rgba(0,0,0,0.2);
-            text-decoration: none;
-            color: #667eea;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.3s;
-            z-index: 100;
-        }
-
-        .speedtest-link:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        }
-
         /* Edit modal */
         .modal {
             display: none;
@@ -1256,10 +1263,6 @@ if ($isViewMode) {
     </style>
 </head>
 <body>
-    <?php if ($speedtestUrl): ?>
-    <a href="<?= htmlspecialchars($speedtestUrl) ?>" class="speedtest-link" target="_blank">Speed Test</a>
-    <?php endif; ?>
-
     <div class="chat-container">
         <div class="chat-header">
             <div class="chat-header-left">
@@ -1532,6 +1535,7 @@ if ($isViewMode) {
                         </div>
                         <div class="message-bubble">
                             <div class="ql-editor">${msg.text}</div>
+                            <button class="copy-btn" onclick="copyMessage('${msg.id}')" title="Копирай">📋</button>
                         </div>
                         ${msg.author_id === userId ? `
                             <div class="message-actions">
@@ -1891,6 +1895,32 @@ if ($isViewMode) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // Copy message to clipboard
+        function copyMessage(messageId) {
+            const msg = messages.find(m => m.id === messageId);
+            if (!msg) return;
+
+            // Extract plain text from HTML
+            const div = document.createElement('div');
+            div.innerHTML = msg.text;
+            const text = div.textContent || div.innerText;
+
+            navigator.clipboard.writeText(text).then(() => {
+                // Visual feedback
+                const msgElement = document.querySelector(`[data-id="${messageId}"] .copy-btn`);
+                if (msgElement) {
+                    msgElement.classList.add('copied');
+                    msgElement.textContent = '✓';
+                    setTimeout(() => {
+                        msgElement.classList.remove('copied');
+                        msgElement.textContent = '📋';
+                    }, 1500);
+                }
+            }).catch(err => {
+                console.error('Failed to copy:', err);
+            });
         }
     </script>
 </body>
