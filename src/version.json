@@ -1,6 +1,6 @@
 {
-    "version": "3.5.4",
-    "released": "2026-02-02",
-    "changelog": "Admin-only updates, configurable admin users, installer --path option",
+    "version": "3.5.5",
+    "released": "2026-02-03",
+    "changelog": "Chat improvements: copy button, auto-extend on message, installer SSL fix",
     "download_url": "https://webshare.techbg.net/"
 }

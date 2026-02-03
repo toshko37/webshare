@@ -2,6 +2,22 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.5.5] - 2026-02-03
+
+### Chat Improvements
+- **Copy button** - Added 📋 icon at bottom-right of each message
+  - Click to copy message text to clipboard
+  - Shows ✓ checkmark when copied
+- **Auto-extend expiration** - Chat expiration resets to 24h when message is sent
+  - If chat is used daily, it stays active indefinitely
+- **Removed speedtest link** - No longer shown in chat window
+
+### Installer Fixes
+- **SSL vhost path fix** - Installer now updates SSL vhost paths after certbot
+  - Fixes issue where certbot copied old DocumentRoot paths
+- **Added security-check.php** - Missing from installer file list (caused 500 error)
+- **Default to current directory** - Installer uses `pwd` as default installation path
+
 ## [3.5.4] - 2026-02-02
 
 ### Security

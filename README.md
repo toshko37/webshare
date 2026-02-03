@@ -2,7 +2,7 @@
 
 **WebShare** is a simple, self-hosted file sharing application with multi-user support, folder organization, file encryption, and one-click updates.
 
-![Version](https://img.shields.io/badge/version-3.5.4-green)
+![Version](https://img.shields.io/badge/version-3.5.5-green)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![PHP](https://img.shields.io/badge/PHP-7.4%2B-purple)
 
