@@ -121,6 +121,11 @@ try {
     $dirs = glob($extractDir . '/*', GLOB_ONLYDIR);
     $sourceDir = $dirs[0] ?? $extractDir;
 
+    // GitHub tarball mirrors repo structure - files are in src/ subdirectory
+    if (is_dir($sourceDir . '/src')) {
+        $sourceDir = $sourceDir . '/src';
+    }
+
     $result['steps'][] = 'Extraction complete';
 
     // Step 5: Copy new files
