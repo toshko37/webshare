@@ -271,10 +271,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'post' && !empty($token
 
     saveConversation($jsonPath, $conversation);
 
-    // Update metadata and reset expiration to 24h from now
+    // Update metadata
     $metadata[$token]['message_count'] = count($conversation['messages']);
     $metadata[$token]['last_activity'] = $now;
-    $metadata[$token]['expires'] = $now + (TEXT_EXPIRE_HOURS * 3600); // Reset to 24h
+
+    // Only reset expiration if less than 24h remaining (don't reduce extended time)
+    $minExpires = $now + (TEXT_EXPIRE_HOURS * 3600);
+    if ($metadata[$token]['expires'] < $minExpires) {
+        $metadata[$token]['expires'] = $minExpires;
+    }
     saveMetadata($metadataFile, $metadata);
 
     writeAuditLog('chat_message', "Message in conversation: $token by $author", 'anonymous');
@@ -1504,8 +1509,24 @@ if ($isViewMode) {
             }
         }
 
+        // Check if user is selecting text inside chat messages
+        function isSelectingInChat() {
+            const selection = window.getSelection();
+            if (!selection || selection.isCollapsed) return false;
+            const container = document.getElementById('chat-messages');
+            let node = selection.anchorNode;
+            while (node) {
+                if (node === container) return true;
+                node = node.parentNode;
+            }
+            return false;
+        }
+
         // Render messages
         function renderMessages() {
+            // Skip re-render if user is selecting text (to not break copy)
+            if (isSelectingInChat()) return;
+
             const container = document.getElementById('chat-messages');
             const wasAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 50;
 
@@ -1902,10 +1923,16 @@ if ($isViewMode) {
             const msg = messages.find(m => m.id === messageId);
             if (!msg) return;
 
-            // Extract plain text from HTML
-            const div = document.createElement('div');
-            div.innerHTML = msg.text;
-            const text = div.textContent || div.innerText;
+            // Extract plain text from HTML, preserving line breaks
+            let text = msg.text;
+            text = text.replace(/<br\s*\/?>/gi, '\n');
+            text = text.replace(/<\/p>\s*<p[^>]*>/gi, '\n');
+            text = text.replace(/<\/li>\s*<li[^>]*>/gi, '\n');
+            text = text.replace(/<[^>]+>/g, '');
+            // Decode HTML entities
+            const ta = document.createElement('textarea');
+            ta.innerHTML = text;
+            text = ta.value.trim();
 
             navigator.clipboard.writeText(text).then(() => {
                 // Visual feedback

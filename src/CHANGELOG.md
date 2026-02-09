@@ -2,6 +2,18 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.5.6] - 2026-02-09
+
+### Chat Fixes
+- **Smart expiration reset** - Messages no longer reset expiration to 24h if time was extended
+  - If remaining time is already above 24h (e.g. extended by a week), it stays unchanged
+  - Only resets to 24h minimum when remaining time drops below that
+- **Selection-safe polling** - Chat no longer breaks text selection when polling for new messages
+  - Detects active text selection in the chat area and skips re-render
+  - Allows copying text with Ctrl+C without losing selection
+- **Copy preserves line breaks** - Copy button now correctly preserves multi-line formatting
+  - Text copied to clipboard maintains original line breaks when pasted in Notepad etc.
+
 ## [3.5.5] - 2026-02-03
 
 ### Chat Improvements
@@ -520,6 +532,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.5.6  | 2026-02-09 | Chat: smart expiration, selection-safe polling, copy line breaks |
 |  3.5.0  | 2026-02-01 | Project restructuring - src/ folder, audit log rotation, chat buttons |
 |  3.4.1  | 2026-02-01 | Beta update server option |
 |  3.4.0  | 2026-02-01 | Folder sharing, chat improvements |
