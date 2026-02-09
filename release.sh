@@ -8,16 +8,17 @@
 #   3. Commits, pushes, creates GitHub release
 #
 # Usage:
-#   ./release.sh <version> <title> [--hierarchical]
+#   ./release.sh <version> <title> [--notes-file <file>] [--yes]
 #
 # Examples:
+#   # Interactive - opens editor for changelog:
 #   ./release.sh 3.5.7 "Chat: new feature, bug fix"
-#   ./release.sh 3.6.0 "Major redesign" --hierarchical
 #
-# The script will:
-#   - Open your $EDITOR to write changelog details
-#   - Show a summary for confirmation before committing
-#   - Create git commit, push, and GitHub release
+#   # From file (for use with Claude or scripts):
+#   ./release.sh 3.5.7 "Chat: new feature" --notes-file /tmp/notes.md
+#
+#   # Skip confirmation:
+#   ./release.sh 3.5.7 "Quick fix" --notes-file /tmp/notes.md --yes
 # ============================================================
 
 set -e
@@ -36,22 +37,52 @@ INDEX_PHP="$SRC_DIR/index.php"
 VERSION_JSON="$SRC_DIR/version.json"
 CHANGELOG_MD="$SRC_DIR/CHANGELOG.md"
 
+# Parse arguments
+NEW_VERSION=""
+SHORT_DESC=""
+NOTES_FILE=""
+AUTO_YES=false
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --notes-file)
+            NOTES_FILE="$2"
+            shift 2
+            ;;
+        --yes|-y)
+            AUTO_YES=true
+            shift
+            ;;
+        *)
+            if [ -z "$NEW_VERSION" ]; then
+                NEW_VERSION="$1"
+            elif [ -z "$SHORT_DESC" ]; then
+                SHORT_DESC="$1"
+            fi
+            shift
+            ;;
+    esac
+done
+
+TODAY=$(date +%Y-%m-%d)
+
 # Validate arguments
-if [ $# -lt 2 ]; then
-    echo -e "${RED}Usage: $0 <version> <short-description>${NC}"
+if [ -z "$NEW_VERSION" ] || [ -z "$SHORT_DESC" ]; then
+    echo -e "${RED}Usage: $0 <version> <short-description> [options]${NC}"
     echo ""
-    echo "  version           New version number (e.g. 3.5.7)"
-    echo "  short-description One-line summary for version.json and commit"
+    echo "  version             New version number (e.g. 3.5.7)"
+    echo "  short-description   One-line summary for version.json and commit"
+    echo ""
+    echo "Options:"
+    echo "  --notes-file FILE   Read changelog from file instead of opening editor"
+    echo "  --yes, -y           Skip confirmation prompt"
     echo ""
     echo "Examples:"
     echo "  $0 3.5.7 \"Chat: new feature, bug fix\""
-    echo "  $0 3.6.0 \"Major redesign\""
+    echo "  $0 3.5.7 \"Chat fix\" --notes-file /tmp/notes.md"
+    echo "  $0 3.5.7 \"Quick fix\" --notes-file /tmp/notes.md --yes"
     exit 1
 fi
-
-NEW_VERSION="$1"
-SHORT_DESC="$2"
-TODAY=$(date +%Y-%m-%d)
 
 # Validate version format
 if ! echo "$NEW_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
@@ -72,50 +103,60 @@ echo -e "  Date:            $TODAY"
 echo -e "${CYAN}============================================${NC}"
 echo ""
 
-# Check for uncommitted changes (besides what we're about to change)
+# Check for uncommitted changes
 if [ -n "$(git status --porcelain)" ]; then
     echo -e "${YELLOW}Warning: You have uncommitted changes:${NC}"
     git status --short
     echo ""
-    read -p "Continue anyway? (y/N) " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Aborted."
-        exit 1
+    if [ "$AUTO_YES" = false ]; then
+        read -p "Continue anyway? (y/N) " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Aborted."
+            exit 1
+        fi
     fi
 fi
 
 # ============================================================
-# Step 1: Write changelog entry
+# Step 1: Get changelog entry
 # ============================================================
-echo -e "${CYAN}Step 1: Writing changelog...${NC}"
+echo -e "${CYAN}Step 1: Changelog...${NC}"
 
-TMPFILE=$(mktemp /tmp/changelog-XXXXXX.md)
-
-# Pre-fill template
-cat > "$TMPFILE" << 'TEMPLATE'
+if [ -n "$NOTES_FILE" ]; then
+    # Read from file
+    if [ ! -f "$NOTES_FILE" ]; then
+        echo -e "${RED}Error: Notes file not found: $NOTES_FILE${NC}"
+        exit 1
+    fi
+    CHANGELOG_ENTRY=$(cat "$NOTES_FILE")
+    echo -e "  Read from: ${YELLOW}$NOTES_FILE${NC}"
+else
+    # Open editor
+    TMPFILE=$(mktemp /tmp/changelog-XXXXXX.md)
+    cat > "$TMPFILE" << TEMPLATE
 ### Section Title
 - **Feature name** - Short description of what it does
   - Additional detail if needed
 - **Another change** - Description
-
 TEMPLATE
 
-# Open editor
-EDITOR_CMD="${EDITOR:-nano}"
-echo -e "Opening ${YELLOW}$EDITOR_CMD${NC} for changelog entry..."
-echo -e "(Write the changelog content for v$NEW_VERSION, then save and close)"
-echo ""
-$EDITOR_CMD "$TMPFILE"
+    EDITOR_CMD="${EDITOR:-nano}"
+    echo -e "  Opening ${YELLOW}$EDITOR_CMD${NC}..."
+    echo -e "  (Write changelog for v$NEW_VERSION, then save and close)"
+    echo ""
+    $EDITOR_CMD "$TMPFILE"
 
-# Read what was written
-CHANGELOG_ENTRY=$(cat "$TMPFILE")
-rm -f "$TMPFILE"
+    CHANGELOG_ENTRY=$(cat "$TMPFILE")
+    rm -f "$TMPFILE"
+fi
 
-if [ -z "$CHANGELOG_ENTRY" ] || [ "$CHANGELOG_ENTRY" = "" ]; then
+if [ -z "$CHANGELOG_ENTRY" ]; then
     echo -e "${RED}Error: Empty changelog entry. Aborted.${NC}"
     exit 1
 fi
+
+echo -e "  ${GREEN}✓${NC} Changelog ready ($(echo "$CHANGELOG_ENTRY" | wc -l) lines)"
 
 # ============================================================
 # Step 2: Update files
@@ -127,32 +168,39 @@ sed -i "s/define('WEBSHARE_VERSION', '[^']*')/define('WEBSHARE_VERSION', '$NEW_V
 echo -e "  ${GREEN}✓${NC} index.php → $NEW_VERSION"
 
 # 2b. Update version.json
+# Escape double quotes in SHORT_DESC for JSON
+JSON_DESC=$(echo "$SHORT_DESC" | sed 's/"/\\"/g')
 cat > "$VERSION_JSON" << EOF
 {
     "version": "$NEW_VERSION",
     "released": "$TODAY",
-    "changelog": "$SHORT_DESC",
+    "changelog": "$JSON_DESC",
     "download_url": "https://webshare.techbg.net/"
 }
 EOF
 echo -e "  ${GREEN}✓${NC} version.json → $NEW_VERSION"
 
-# 2c. Update CHANGELOG.md - add new section after header
-CHANGELOG_HEADER="## [$NEW_VERSION] - $TODAY
+# 2c. Update CHANGELOG.md - insert new section after header line
+# Build the new section
+NEW_SECTION="## [$NEW_VERSION] - $TODAY
 
 $CHANGELOG_ENTRY"
 
-# Insert after "All notable changes..." line
-sed -i "/^All notable changes.*$/a\\
-\\
-$( echo "$CHANGELOG_HEADER" | sed 's/$/\\/' | sed '$ s/\\$//' )" "$CHANGELOG_MD"
-
-# Remove any double blank lines that may have been created
-sed -i '/^$/N;/^\n$/d' "$CHANGELOG_MD"
+# Create temp file with updated changelog
+{
+    # Print first 3 lines (header)
+    head -3 "$CHANGELOG_MD"
+    echo ""
+    # Print new section
+    echo "$NEW_SECTION"
+    echo ""
+    # Print rest of file (skip first 3 lines + optional blank line)
+    tail -n +4 "$CHANGELOG_MD" | sed '1{/^$/d}'
+} > "${CHANGELOG_MD}.tmp"
+mv "${CHANGELOG_MD}.tmp" "$CHANGELOG_MD"
 echo -e "  ${GREEN}✓${NC} CHANGELOG.md → new section added"
 
 # 2d. Update version history table
-# Find the table header line and add new row after the separator
 TABLE_ROW="|  $NEW_VERSION  | $TODAY | $SHORT_DESC |"
 sed -i "/^|---------|/a $TABLE_ROW" "$CHANGELOG_MD"
 echo -e "  ${GREEN}✓${NC} CHANGELOG.md → version table updated"
@@ -162,24 +210,25 @@ echo -e "  ${GREEN}✓${NC} CHANGELOG.md → version table updated"
 # ============================================================
 echo ""
 echo -e "${CYAN}============================================${NC}"
-echo -e "${CYAN}  Summary of changes${NC}"
+echo -e "${CYAN}  Summary${NC}"
 echo -e "${CYAN}============================================${NC}"
 echo ""
 git diff --stat
 echo ""
-echo -e "${YELLOW}Changelog entry:${NC}"
+echo -e "${YELLOW}Changelog:${NC}"
 echo "$CHANGELOG_ENTRY"
 echo ""
-echo -e "Commit message: ${GREEN}v$NEW_VERSION - $SHORT_DESC${NC}"
+echo -e "Commit: ${GREEN}v$NEW_VERSION - $SHORT_DESC${NC}"
 echo ""
 
-read -p "Proceed with commit, push, and GitHub release? (y/N) " -n 1 -r
-echo ""
-
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo -e "${YELLOW}Changes are saved locally but NOT committed.${NC}"
-    echo "You can review and commit manually, or run: git checkout -- src/"
-    exit 0
+if [ "$AUTO_YES" = false ]; then
+    read -p "Proceed with commit, push, and GitHub release? (y/N) " -n 1 -r
+    echo ""
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo -e "${YELLOW}Changes saved locally but NOT committed.${NC}"
+        echo "To undo: git checkout -- src/"
+        exit 0
+    fi
 fi
 
 # ============================================================
@@ -187,12 +236,13 @@ fi
 # ============================================================
 echo -e "${CYAN}Step 3: Committing and pushing...${NC}"
 
+# Add version files + any other changed src files
 git add "$INDEX_PHP" "$VERSION_JSON" "$CHANGELOG_MD"
 
-# Also add any other staged changes
+# Show what's being committed
 STAGED=$(git diff --cached --name-only 2>/dev/null)
 if [ -n "$STAGED" ]; then
-    echo -e "  Files to commit:"
+    echo -e "  Files:"
     echo "$STAGED" | sed 's/^/    /'
 fi
 
@@ -202,7 +252,6 @@ v$NEW_VERSION - $SHORT_DESC
 Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>
 EOF
 )"
-
 echo -e "  ${GREEN}✓${NC} Committed"
 
 git push
