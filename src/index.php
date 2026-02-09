@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.5.5');
+define('WEBSHARE_VERSION', '3.5.6');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
