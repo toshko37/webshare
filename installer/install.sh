@@ -128,11 +128,13 @@ check_existing_installation() {
         check_mark "WebShare installation found"
     fi
 
-    # Check for .htpasswd
-    if [ -f "$INSTALL_DIR/.htpasswd" ]; then
-        has_htpasswd=true
+    # Check for .users.json (or legacy .htpasswd)
+    if [ -f "$SRC_DIR/.users.json" ]; then
+        local user_count=$(php -r "echo count(json_decode(file_get_contents('$SRC_DIR/.users.json'), true));" 2>/dev/null || echo "?")
+        check_mark ".users.json - $user_count user(s)"
+    elif [ -f "$INSTALL_DIR/.htpasswd" ]; then
         local user_count=$(wc -l < "$INSTALL_DIR/.htpasswd")
-        check_mark ".htpasswd - $user_count user(s)"
+        check_mark ".htpasswd (legacy) - $user_count user(s)"
     fi
 
     # Check for .config.json
@@ -185,7 +187,7 @@ show_reinstall_menu() {
     echo ""
     echo -e "  ${YELLOW}2)${NC} Fresh install (preserve data)"
     echo "     - Reinstalls software"
-    echo "     - Preserves files/, texts/, .htpasswd"
+    echo "     - Preserves files/, texts/, .users.json"
     echo ""
     echo -e "  ${RED}3)${NC} Complete reinstall"
     echo "     - Deletes everything and starts fresh"
@@ -445,6 +447,7 @@ fi
 
 # List of files to download
 PHP_FILES=(
+    "security-check.php" "login.php" "logout.php"
     "index.php" "upload.php" "public.php" "download.php"
     "t.php" "text.php" "share.php" "folder-management.php"
     "encryption.php" "audit-log.php" "geo-check.php"
@@ -556,7 +559,6 @@ cd "$SRC_DIR"
 [ ! -L "backups" ] && [ ! -e "backups" ] && ln -sf ../backups backups
 
 # Data files
-[ ! -L ".htpasswd" ] && [ ! -e ".htpasswd" ] && ln -sf ../.htpasswd .htpasswd
 [ ! -L ".config.json" ] && [ ! -e ".config.json" ] && ln -sf ../.config.json .config.json
 [ ! -L ".geo.json" ] && [ ! -e ".geo.json" ] && ln -sf ../.geo.json .geo.json
 [ ! -L ".audit.json" ] && [ ! -e ".audit.json" ] && ln -sf ../.audit.json .audit.json
@@ -613,17 +615,10 @@ UPDATECONF
 success "Configuration created"
 
 # ============================================
-# 7. Update .htaccess with correct path
+# 7. .htaccess (already downloaded, no placeholder replacement needed)
 # ============================================
 info "Configuring .htaccess..."
-
-if [ -f "$SRC_DIR/.htaccess" ]; then
-    # Handle both GitHub version (has actual path) and dev version (has placeholder)
-    sed -i "s|AuthUserFile .*/\.htpasswd|AuthUserFile $INSTALL_DIR/.htpasswd|g" "$SRC_DIR/.htaccess"
-    sed -i "s|__HTPASSWD_PATH__|$INSTALL_DIR/.htpasswd|g" "$SRC_DIR/.htaccess"
-fi
-
-success ".htaccess configured"
+[ -f "$SRC_DIR/.htaccess" ] && success ".htaccess configured" || warn ".htaccess not found"
 
 # ============================================
 # 8. Files directory protection
@@ -652,16 +647,20 @@ BACKUPSHT
 success "Directories protected"
 
 # ============================================
-# 9. Create/Update .htpasswd
+# 9. Create .sessions directory
 # ============================================
-if [ "$PRESERVE_DATA" = false ] || [ ! -f "$INSTALL_DIR/.htpasswd" ]; then
-    info "Creating .htpasswd..."
-    htpasswd -cb "$INSTALL_DIR/.htpasswd" "$AUTH_USER" "$AUTH_PASS"
-    success ".htpasswd created"
-else
-    info "Preserving existing .htpasswd"
-    success ".htpasswd preserved"
-fi
+info "Creating .sessions directory..."
+
+mkdir -p "$SRC_DIR/.sessions"
+chown www-data:www-data "$SRC_DIR/.sessions"
+chmod 700 "$SRC_DIR/.sessions"
+
+# Protect sessions directory from web access
+cat > "$SRC_DIR/.sessions/.htaccess" << 'SESSIONSHT'
+Require all denied
+SESSIONSHT
+
+success ".sessions directory created"
 
 # ============================================
 # 10. Copy GeoIP database locally
@@ -689,7 +688,6 @@ chmod 750 "$INSTALL_DIR/texts"
 chmod 755 "$INSTALL_DIR/backups"
 
 # Config files in root
-chmod 600 "$INSTALL_DIR/.htpasswd" 2>/dev/null || true
 chmod 600 "$INSTALL_DIR/.api-keys.json" 2>/dev/null || true
 chmod 600 "$INSTALL_DIR/.tokens.json" 2>/dev/null || true
 chmod 600 "$INSTALL_DIR/.encryption-keys.json" 2>/dev/null || true
@@ -699,7 +697,6 @@ chmod 644 "$INSTALL_DIR/.files-meta.json" 2>/dev/null || true
 chmod 644 "$INSTALL_DIR/.texts.json" 2>/dev/null || true
 chmod 644 "$INSTALL_DIR/.audit.json" 2>/dev/null || true
 chown www-data:www-data "$INSTALL_DIR"/.*json 2>/dev/null || true
-chown www-data:www-data "$INSTALL_DIR/.htpasswd" 2>/dev/null || true
 
 # Source directory
 chown -R www-data:www-data "$SRC_DIR"
@@ -848,9 +845,9 @@ echo -e "  Public Upload:  ${CYAN}https://${DOMAIN}/u${NC}"
 echo -e "  Public Text:    ${CYAN}https://${DOMAIN}/t${NC}"
 echo ""
 if [ "$PRESERVE_DATA" = false ]; then
-    echo "Login credentials:"
-    echo -e "  Username: ${GREEN}$AUTH_USER${NC}"
-    echo -e "  Password: ${GREEN}$AUTH_PASS${NC}"
+    echo -e "${YELLOW}First login:${NC}"
+    echo "  Visit https://${DOMAIN}/ and you will be asked to create"
+    echo "  an admin username and password (first-run setup wizard)."
     echo ""
 fi
 echo "Directory structure:"
@@ -864,32 +861,3 @@ echo "To update: ${INSTALL_DIR}/installer/update.sh"
 echo "To change source: ${INSTALL_DIR}/.update-config.json"
 echo ""
 
-# Save credentials if new installation
-if [ "$PRESERVE_DATA" = false ]; then
-    cat > "$INSTALL_DIR/CREDENTIALS.txt" << CREDS
-WebShare Credentials
-====================
-Domain: https://${DOMAIN}/
-Username: ${AUTH_USER}
-Password: ${AUTH_PASS}
-
-Public URLs:
-  Upload: https://${DOMAIN}/u
-  Text: https://${DOMAIN}/t
-
-Directory Structure:
-  Root:   ${INSTALL_DIR}/
-  Source: ${INSTALL_DIR}/src/
-  Files:  ${INSTALL_DIR}/files/
-  Texts:  ${INSTALL_DIR}/texts/
-
-Installed: $(date)
-Update Source: $SOURCE
-
-To update: ./installer/update.sh
-CREDS
-
-    chmod 600 "$INSTALL_DIR/CREDENTIALS.txt"
-    chown www-data:www-data "$INSTALL_DIR/CREDENTIALS.txt"
-    info "Credentials saved to: ${INSTALL_DIR}/CREDENTIALS.txt"
-fi

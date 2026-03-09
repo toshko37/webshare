@@ -2,6 +2,23 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.1] - 2026-03-09
+
+### Bug Fixes
+
+- **Login function conflict** - Renamed `getClientIp()` in `login.php` to avoid conflict with `geo-check.php` (caused HTTP 500 on login)
+- **Session directory permissions** - Fixed `.sessions/` directory ownership (was root, now www-data)
+- **Settings tab after user actions** - Used Post-Redirect-Get so adding/changing/deleting users keeps the Settings tab open and shows success message
+
+### Update System Improvements
+
+- **Live-update file list** - Added `security-check.php`, `login.php`, `logout.php` as first entries (ensures auth files are always updated first)
+- **Live-update post-install** - Auto-creates `.sessions/` directory with correct permissions if missing
+- **Installer** - Removed `.htpasswd` creation; now uses session-based auth from the start
+- **Installer** - Added `.sessions/` directory setup with correct permissions
+- **Installer** - First visit shows admin account creation wizard (no pre-set credentials)
+- **Installer** - Added `security-check.php`, `login.php`, `logout.php` to download file list
+
 ## [3.6.0] - 2026-03-09
 
 ### Session-Based Authentication (replaces HTTP Basic Auth)
@@ -562,6 +579,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.1  | 2026-03-09 | Fix login 500 error, session permissions, update system improvements |
 |  3.6.0  | 2026-03-09 | Switch to PHP session-based authentication with multi-user support |
 |  3.5.6  | 2026-02-09 | Chat: smart expiration, selection-safe polling, copy line breaks |
 |  3.5.0  | 2026-02-01 | Project restructuring - src/ folder, audit log rotation, chat buttons |

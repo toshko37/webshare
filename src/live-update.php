@@ -72,7 +72,12 @@ if ($config['stable']) {
 }
 
 // Files to update (same list as update.sh)
+// NOTE: security-check.php, login.php, logout.php are listed FIRST so they're
+// always downloaded even when this script itself is the old version being replaced.
 $phpFiles = [
+    'security-check.php',
+    'login.php',
+    'logout.php',
     'index.php',
     'upload.php',
     'public.php',
@@ -101,10 +106,7 @@ $phpFiles = [
     'get-speedtest.php',
     'get-update.php',
     'get-update-script.php',
-    'security-headers.php',
-    'login.php',
-    'logout.php',
-    'security-check.php'
+    'security-headers.php'
 ];
 
 $otherFiles = [
@@ -263,6 +265,16 @@ try {
 
     // Step 5: Set permissions
     $result['steps'][] = ['step' => 'Setting permissions', 'status' => 'running'];
+
+    // Ensure .sessions/ directory exists with correct permissions
+    $sessionsDir = $installDir . '/.sessions';
+    if (!is_dir($sessionsDir)) {
+        mkdir($sessionsDir, 0700, true);
+        @chown($sessionsDir, 'www-data');
+        @chgrp($sessionsDir, 'www-data');
+        // Create .htaccess to deny web access
+        file_put_contents($sessionsDir . '/.htaccess', "Require all denied\n");
+    }
 
     // Set ownership to www-data
     foreach (glob($installDir . '/*.php') as $file) {
