@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.6.7');
+define('WEBSHARE_VERSION', '3.6.8');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
@@ -5427,6 +5427,9 @@ systemctl reload apache2</code>
 
                     // Clear editor
                     quill.setText('');
+
+                    // Reload to refresh chat list (tab is saved, will return to Chats)
+                    setTimeout(() => window.location.reload(), 1500);
                 }
             } catch (error) {
                 // Silently fail

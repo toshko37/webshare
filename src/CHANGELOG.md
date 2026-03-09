@@ -2,6 +2,12 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.8] - 2026-03-09
+
+### Bug Fix
+
+- **Chat list refreshes after creation** – Page reloads after creating a chat to show the new entry in the list; tab persistence (from v3.6.5) ensures the user returns to the Chats tab automatically
+
 ## [3.6.7] - 2026-03-09
 
 ### Bug Fix
@@ -623,6 +629,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.8  | 2026-03-09 | Fix: refresh chat list after creation while staying on Chats tab |
 |  3.6.7  | 2026-03-09 | Fix: stay on Chats tab after creating a chat |
 |  3.6.6  | 2026-03-09 | Fix: Settings tab now persists across reloads like other tabs |
 |  3.6.5  | 2026-03-09 | Fix: tab persistence after actions and fresh login always on Files |

@@ -1,6 +1,6 @@
 {
-    "version": "3.6.7",
+    "version": "3.6.8",
     "released": "2026-03-09",
-    "changelog": "Fix: stay on Chats tab after creating a chat",
+    "changelog": "Fix: refresh chat list after creation while staying on Chats tab",
     "download_url": "https://webshare.techbg.net/"
 }
