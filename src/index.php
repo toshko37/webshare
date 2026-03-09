@@ -160,19 +160,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mail']) && $isAd
     exit;
 }
 
-// Handle user management actions
-$userMessage = null;
-$userError = null;
-
+// Handle user management actions (Post-Redirect-Get to avoid double-submit and keep Settings tab)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_action']) && $isAdmin) {
+    $redirectMsg = null;
+    $redirectErr = null;
+
     switch ($_POST['user_action']) {
         case 'add':
             $result = addUser($_POST['new_username'] ?? '', $_POST['new_password'] ?? '');
             if ($result['success']) {
                 writeAuditLog('user_add', "Added user: " . $_POST['new_username']);
-                $userMessage = 'User added successfully';
+                $redirectMsg = 'User added successfully';
             } else {
-                $userError = $result['error'];
+                $redirectErr = $result['error'];
             }
             break;
 
@@ -180,9 +180,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_action']) && $is
             $result = changePassword($_POST['change_username'] ?? '', $_POST['change_password'] ?? '');
             if ($result['success']) {
                 writeAuditLog('user_password', "Password changed for: " . $_POST['change_username']);
-                $userMessage = 'Password changed successfully';
+                $redirectMsg = 'Password changed successfully';
             } else {
-                $userError = $result['error'];
+                $redirectErr = $result['error'];
             }
             break;
 
@@ -190,13 +190,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_action']) && $is
             $result = deleteUser($_POST['delete_username'] ?? '');
             if ($result['success']) {
                 writeAuditLog('user_delete', "Deleted user: " . $_POST['delete_username']);
-                $userMessage = 'User deleted successfully';
+                $redirectMsg = 'User deleted successfully';
             } else {
-                $userError = $result['error'];
+                $redirectErr = $result['error'];
             }
             break;
     }
+
+    $qs = $redirectMsg ? '?tab=settings&user_msg=' . urlencode($redirectMsg) : '?tab=settings&user_err=' . urlencode($redirectErr);
+    header('Location: ' . $qs);
+    exit;
 }
+
+$userMessage = $_GET['user_msg'] ?? null;
+$userError   = $_GET['user_err'] ?? null;
 
 // Load geo config for display
 $geoConfig = loadGeoConfig();
