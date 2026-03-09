@@ -2,6 +2,14 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.5] - 2026-03-09
+
+### Tab Persistence
+
+- **Stay in current tab** – After any action (chat create/delete, file operations, audit purge, settings changes), the page reloads and returns to the same tab that was active
+- **Login always shows Files tab** – After successful login, always starts on the Files (first) tab regardless of which tab was open before logout
+- **All tabs saved** – Audit Log and Sessions tabs are now also remembered across page reloads (previously only Chats and Help were saved)
+
 ## [3.6.4] - 2026-03-09
 
 ### Audit Log – Retention Management
@@ -603,6 +611,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.5  | 2026-03-09 | Fix: tab persistence after actions and fresh login always on Files |
 |  3.6.4  | 2026-03-09 | Audit log retention management: purge entries older than 7 or 30 days |
 |  3.6.3  | 2026-03-09 | Security: fix text.php auth and AJAX session expiry handling |
 |  3.6.2  | 2026-03-09 | Fix: session close redirect and current session detection |

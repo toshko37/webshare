@@ -1,6 +1,6 @@
 {
-    "version": "3.6.4",
+    "version": "3.6.5",
     "released": "2026-03-09",
-    "changelog": "Audit log retention management: purge entries older than 7 or 30 days",
+    "changelog": "Fix: tab persistence after actions and fresh login always on Files",
     "download_url": "https://webshare.techbg.net/"
 }

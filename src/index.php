@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.6.4');
+define('WEBSHARE_VERSION', '3.6.5');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
@@ -5344,31 +5344,35 @@ systemctl reload apache2</code>
 
         // Restore active tab on page load
         (function() {
-            // Check URL parameter first (for direct links)
             const urlParams = new URLSearchParams(window.location.search);
+
+            // Fresh login → clear saved tab, stay on files
+            if (urlParams.has('_login')) {
+                localStorage.removeItem('activeTab');
+                history.replaceState({}, '', '/');
+                return;
+            }
+
+            // ?tab=X param (PRG redirects: settings, audit after purge, etc.)
             const tabParam = urlParams.get('tab');
             if (tabParam && document.getElementById(tabParam + '-tab')) {
                 switchTab(tabParam);
                 return;
             }
 
-            // Check URL hash
+            // URL hash
             const hash = window.location.hash.replace('#', '');
             if (hash && document.getElementById(hash + '-tab')) {
                 switchTab(hash);
                 return;
             }
 
+            // Restore any saved tab
             const savedTab = localStorage.getItem('activeTab');
-            // Restore 'texts' and 'help' tabs, default to 'files' for others
-            if (savedTab === 'texts' || savedTab === 'help') {
-                const tabElement = document.getElementById(savedTab + '-tab');
-                if (tabElement) {
-                    switchTab(savedTab);
-                }
-            }
-            // Clean up any old settings value
-            if (savedTab === 'settings') {
+            const validTabs = ['files', 'texts', 'help', 'audit', 'sessions'];
+            if (savedTab && validTabs.includes(savedTab) && document.getElementById(savedTab + '-tab')) {
+                switchTab(savedTab);
+            } else if (savedTab) {
                 localStorage.removeItem('activeTab');
             }
         })();

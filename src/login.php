@@ -169,7 +169,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             createSession($username, $rememberMe, $ip, $_SERVER['HTTP_USER_AGENT'] ?? '');
             require_once __DIR__ . '/audit-log.php';
             writeAuditLog('login', "User logged in from $ip");
-            header('Location: ' . ($_GET['redirect'] ?? '/'));
+            $dest = $_GET['redirect'] ?? '/';
+            if ($dest === '/') $dest = '/?_login=1';
+            header('Location: ' . $dest);
             exit;
         } else {
             recordFailedAttempt($ip);
