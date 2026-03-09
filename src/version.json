@@ -1,6 +1,6 @@
 {
-    "version": "3.6.1",
+    "version": "3.6.2",
     "released": "2026-03-09",
-    "changelog": "Fix login 500 error, session permissions, update system improvements",
+    "changelog": "Fix: session close redirect and current session detection",
     "download_url": "https://webshare.techbg.net/"
 }

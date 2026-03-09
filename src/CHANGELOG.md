@@ -2,6 +2,13 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.2] - 2026-03-09
+
+### Bug Fixes
+
+- **Session close – key mismatch** – Fixed `is_current` vs `current` key mismatch between PHP and JS; the Close button was incorrectly shown for the current session
+- **Session close – no redirect** – Closing your own current session now redirects to login instead of silently reloading the session list
+
 ## [3.6.1] - 2026-03-09
 
 ### Bug Fixes
@@ -579,6 +586,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.2  | 2026-03-09 | Fix: session close redirect and current session detection |
 |  3.6.1  | 2026-03-09 | Fix login 500 error, session permissions, update system improvements |
 |  3.6.0  | 2026-03-09 | Switch to PHP session-based authentication with multi-user support |
 |  3.5.6  | 2026-02-09 | Chat: smart expiration, selection-safe polling, copy line breaks |

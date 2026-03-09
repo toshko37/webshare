@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.6.1');
+define('WEBSHARE_VERSION', '3.6.2');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
@@ -310,9 +310,12 @@ if (isset($_GET['session_action'])) {
         $target = null;
         foreach ($sessions as $s) { if ($s['id'] === $sid) { $target = $s; break; } }
         if ($target && ($isAdmin || $target['username'] === $currentUser)) {
+            $isSelf = ($sid === session_id());
             closeSession($sid);
             writeAuditLog('session_close', "Closed session for " . ($target['username'] ?? '?'));
-            echo json_encode(['success' => true]);
+            $resp = ['success' => true];
+            if ($isSelf) $resp['redirect'] = '/login.php';
+            echo json_encode($resp);
         } else {
             echo json_encode(['success' => false, 'error' => 'Not allowed']);
         }
@@ -3896,8 +3899,10 @@ systemctl reload apache2</code>
                 headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                 body: 'csrf_token=' + encodeURIComponent(csrfToken) + '&session_id=' + encodeURIComponent(sessionId)
             }).then(r => r.json()).then(data => {
-                if (data.success) loadSessions();
-                else alert('Error: ' + (data.error || 'Unknown'));
+                if (data.success) {
+                    if (data.redirect) window.location.href = data.redirect;
+                    else loadSessions();
+                } else alert('Error: ' + (data.error || 'Unknown'));
             });
         }
 
