@@ -293,8 +293,13 @@ if (isset($_GET['session_action'])) {
     header('Content-Type: application/json');
     $sAction = $_GET['session_action'];
 
-    if ($sAction === 'list' && $isAdmin) {
-        echo json_encode(['success' => true, 'sessions' => getSessions()]);
+    if ($sAction === 'list') {
+        $sessions = getSessions();
+        // Non-admins see only their own sessions
+        if (!$isAdmin) {
+            $sessions = array_values(array_filter($sessions, fn($s) => $s['username'] === $currentUser));
+        }
+        echo json_encode(['success' => true, 'sessions' => $sessions]);
         exit;
     }
 
