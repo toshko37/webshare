@@ -2,6 +2,12 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.6] - 2026-03-09
+
+### Bug Fix
+
+- **Settings tab persistence** – Settings tab is now saved and restored like all other tabs; adding/editing users and other settings actions no longer navigate away from Settings
+
 ## [3.6.5] - 2026-03-09
 
 ### Tab Persistence
@@ -611,6 +617,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.6  | 2026-03-09 | Fix: Settings tab now persists across reloads like other tabs |
 |  3.6.5  | 2026-03-09 | Fix: tab persistence after actions and fresh login always on Files |
 |  3.6.4  | 2026-03-09 | Audit log retention management: purge entries older than 7 or 30 days |
 |  3.6.3  | 2026-03-09 | Security: fix text.php auth and AJAX session expiry handling |

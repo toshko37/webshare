@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.6.5');
+define('WEBSHARE_VERSION', '3.6.6');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
@@ -5277,10 +5277,7 @@ systemctl reload apache2</code>
                 }
             });
 
-            // Save to localStorage (except settings - always start fresh)
-            if (tabName !== 'settings') {
-                localStorage.setItem('activeTab', tabName);
-            }
+            localStorage.setItem('activeTab', tabName);
 
             // Load audit log when audit tab is opened
             if (tabName === 'audit' && typeof loadAuditLog === 'function') {
@@ -5369,7 +5366,7 @@ systemctl reload apache2</code>
 
             // Restore any saved tab
             const savedTab = localStorage.getItem('activeTab');
-            const validTabs = ['files', 'texts', 'help', 'audit', 'sessions'];
+            const validTabs = ['files', 'texts', 'help', 'settings', 'audit', 'sessions'];
             if (savedTab && validTabs.includes(savedTab) && document.getElementById(savedTab + '-tab')) {
                 switchTab(savedTab);
             } else if (savedTab) {

@@ -1,6 +1,6 @@
 {
-    "version": "3.6.5",
+    "version": "3.6.6",
     "released": "2026-03-09",
-    "changelog": "Fix: tab persistence after actions and fresh login always on Files",
+    "changelog": "Fix: Settings tab now persists across reloads like other tabs",
     "download_url": "https://webshare.techbg.net/"
 }
