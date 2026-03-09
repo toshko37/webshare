@@ -1,6 +1,6 @@
 {
-    "version": "3.6.2",
+    "version": "3.6.3",
     "released": "2026-03-09",
-    "changelog": "Fix: session close redirect and current session detection",
+    "changelog": "Security: fix text.php auth and AJAX session expiry handling",
     "download_url": "https://webshare.techbg.net/"
 }

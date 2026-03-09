@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.6.2');
+define('WEBSHARE_VERSION', '3.6.3');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
@@ -3742,9 +3742,8 @@ systemctl reload apache2</code>
 
             fetch('?' + params.toString(), { credentials: 'include' })
                 .then(function(response) {
-                    if (!response.ok) {
-                        throw new Error('HTTP ' + response.status);
-                    }
+                    if (response.status === 401) { window.location.href = '/login.php'; return Promise.reject('expired'); }
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
                     return response.json();
                 })
                 .then(function(data) {
@@ -3852,7 +3851,7 @@ systemctl reload apache2</code>
         // Session management
         function loadSessions() {
             fetch('?session_action=list')
-                .then(r => r.json())
+                .then(r => { if (r.status === 401) { window.location.href = '/login.php'; return Promise.reject('expired'); } return r.json(); })
                 .then(data => {
                     if (!data.success) { document.getElementById('sessions-list').innerHTML = '<p style="color:#dc3545;">Error loading sessions</p>'; return; }
                     renderSessions(data.sessions);

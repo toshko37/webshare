@@ -88,6 +88,16 @@ function _sc_tryRememberMe($token) {
 }
 
 if (!_sc_isAuthenticated()) {
+    $isAjax = isset($_GET['audit_action'])
+           || isset($_GET['session_action'])
+           || (($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest')
+           || str_contains($_SERVER['HTTP_ACCEPT'] ?? '', 'application/json');
+    if ($isAjax) {
+        http_response_code(401);
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'error' => 'Session expired', 'redirect' => '/login.php']);
+        exit;
+    }
     $redirect = urlencode($_SERVER['REQUEST_URI'] ?? '/');
     header('Location: /login.php?redirect=' . $redirect);
     exit;

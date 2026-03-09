@@ -2,6 +2,14 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.3] - 2026-03-09
+
+### Security & Bug Fixes
+
+- **text.php auth** – Added `security-check.php` to text.php (chat creation was accessible without valid session; CSRF check also had a bypass when session was missing)
+- **AJAX session expiry** – When session expires, AJAX calls (audit log, session list) now receive 401 JSON instead of HTML redirect, and the browser is redirected to login
+- **Audit log error** – Fixed "Unexpected token '<'" error caused by getting login page HTML instead of JSON after session expiry
+
 ## [3.6.2] - 2026-03-09
 
 ### Bug Fixes
@@ -586,6 +594,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.3  | 2026-03-09 | Security: fix text.php auth and AJAX session expiry handling |
 |  3.6.2  | 2026-03-09 | Fix: session close redirect and current session detection |
 |  3.6.1  | 2026-03-09 | Fix login 500 error, session permissions, update system improvements |
 |  3.6.0  | 2026-03-09 | Switch to PHP session-based authentication with multi-user support |

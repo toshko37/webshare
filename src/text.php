@@ -3,7 +3,7 @@
 // =================
 // Creates shared text snippets with rich formatting
 
-session_start();
+require_once __DIR__ . '/security-check.php';
 
 // CONFIGURATION - Easy to change
 define('TEXT_EXPIRE_HOURS', 24); // ← Change expire time here (in hours)
