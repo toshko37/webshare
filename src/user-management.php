@@ -127,7 +127,7 @@ function getSessions() {
             'created'     => $meta['created'] ?? 0,
             'last_active' => $meta['last_active'] ?? 0,
             'remember_me' => $meta['remember_me'] ?? false,
-            'is_current'  => ($sessId === $currentSessId)
+            'current'     => ($sessId === $currentSessId)
         ];
     }
 
