@@ -1,6 +1,6 @@
 {
-    "version": "3.6.3",
+    "version": "3.6.4",
     "released": "2026-03-09",
-    "changelog": "Security: fix text.php auth and AJAX session expiry handling",
+    "changelog": "Audit log retention management: purge entries older than 7 or 30 days",
     "download_url": "https://webshare.techbg.net/"
 }

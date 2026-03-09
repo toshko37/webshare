@@ -2,6 +2,15 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.4] - 2026-03-09
+
+### Audit Log – Retention Management
+
+- **Delete old entries** – New "Delete >30d" and "Delete >7d" buttons in the Audit Log tab (admin only)
+- **Minimum 7-day retention** – The purge function enforces a minimum of 7 days; entries within the chosen window are always preserved
+- **Purge logged** – Each purge action is recorded in the audit log itself (shows how many entries were deleted and the retention period)
+- **Auto-reload** – After purging, the log table and page stats refresh automatically
+
 ## [3.6.3] - 2026-03-09
 
 ### Security & Bug Fixes
@@ -594,6 +603,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.4  | 2026-03-09 | Audit log retention management: purge entries older than 7 or 30 days |
 |  3.6.3  | 2026-03-09 | Security: fix text.php auth and AJAX session expiry handling |
 |  3.6.2  | 2026-03-09 | Fix: session close redirect and current session detection |
 |  3.6.1  | 2026-03-09 | Fix login 500 error, session permissions, update system improvements |

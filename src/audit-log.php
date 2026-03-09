@@ -378,6 +378,56 @@ function clearAuditLog() {
 }
 
 /**
+ * Purge audit log entries older than $keepDays days.
+ * Always keeps at least 7 days. Returns number of deleted entries.
+ */
+function purgeAuditLog($keepDays) {
+    $keepDays = max(7, intval($keepDays));
+    $cutoff = time() - ($keepDays * 86400);
+
+    // Read everything (newest first)
+    $allLogs = readAllAuditLogs();
+    $before  = count($allLogs);
+
+    // Keep entries within retention window
+    $kept = array_values(array_filter($allLogs, fn($e) => ($e['unix_time'] ?? 0) >= $cutoff));
+    $deleted = $before - count($kept);
+
+    // Prepend purge record
+    array_unshift($kept, [
+        'timestamp'  => date('Y-m-d H:i:s'),
+        'unix_time'  => time(),
+        'user'       => $_SESSION['username'] ?? 'admin',
+        'action'     => 'audit_purged',
+        'details'    => "Deleted $deleted entries older than $keepDays days",
+        'ip'         => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
+        'country'    => 'N/A',
+        'user_agent' => ''
+    ]);
+
+    // Remove all existing archive files
+    for ($i = 1; $i <= AUDIT_MAX_ARCHIVES; $i++) {
+        $p = getAuditArchivePath($i);
+        if (file_exists($p)) unlink($p);
+    }
+
+    // Write current file (most recent AUDIT_MAX_ENTRIES entries)
+    $current = array_slice($kept, 0, AUDIT_MAX_ENTRIES);
+    file_put_contents(AUDIT_LOG_FILE, json_encode($current, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+
+    // Write older chunks to numbered archives
+    $remaining = array_slice($kept, AUDIT_MAX_ENTRIES);
+    $idx = 1;
+    foreach (array_chunk($remaining, AUDIT_MAX_ENTRIES) as $chunk) {
+        if ($idx > AUDIT_MAX_ARCHIVES) break;
+        file_put_contents(getAuditArchivePath($idx), json_encode($chunk, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+        $idx++;
+    }
+
+    return $deleted;
+}
+
+/**
  * Export audit log as CSV
  * Exports all entries including archives
  * @return string CSV content

@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.6.3');
+define('WEBSHARE_VERSION', '3.6.4');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
@@ -281,6 +281,17 @@ if (isset($_GET['audit_action']) && $isAdmin) {
         header('Content-Type: text/csv');
         header('Content-Disposition: attachment; filename="audit-log-' . date('Y-m-d') . '.csv"');
         echo exportAuditLogCSV();
+        exit;
+    }
+
+    if ($action === 'purge' && $_SERVER['REQUEST_METHOD'] === 'POST' && validateCsrf()) {
+        $keepDays = intval($_GET['keep_days'] ?? 0);
+        if (!in_array($keepDays, [7, 30])) {
+            echo json_encode(['success' => false, 'error' => 'Invalid keep_days (must be 7 or 30)']);
+            exit;
+        }
+        $deleted = purgeAuditLog($keepDays);
+        echo json_encode(['success' => true, 'deleted' => $deleted, 'kept_days' => $keepDays]);
         exit;
     }
 
@@ -3593,6 +3604,9 @@ systemctl reload apache2</code>
                         <button onclick="loadAuditLog(1)" style="padding: 8px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">Apply Filters</button>
                         <button onclick="clearAuditFilters()" style="padding: 8px 20px; background: #6c757d; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">Clear Filters</button>
                         <button onclick="exportAuditLog()" style="padding: 8px 20px; background: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">📥 Export CSV</button>
+                        <span style="border-left: 1px solid #ddd; margin: 0 4px;"></span>
+                        <button onclick="purgeAuditLogs(30)" style="padding: 8px 20px; background: #fd7e14; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;" title="Delete entries older than 30 days">🗑️ Delete &gt;30d</button>
+                        <button onclick="purgeAuditLogs(7)" style="padding: 8px 20px; background: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;" title="Delete entries older than 7 days">🗑️ Delete &gt;7d</button>
                     </div>
                 </div>
 
@@ -3846,6 +3860,28 @@ systemctl reload apache2</code>
         // Export audit log as CSV
         function exportAuditLog() {
             window.location.href = '?audit_action=export';
+        }
+
+        // Purge audit log entries older than keepDays days
+        function purgeAuditLogs(keepDays) {
+            if (!confirm('Delete all audit log entries older than ' + keepDays + ' days?\n\nEntries from the last ' + keepDays + ' days will be kept. This cannot be undone.')) return;
+            fetch('?audit_action=purge&keep_days=' + keepDays, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'csrf_token=' + encodeURIComponent(csrfToken)
+            })
+            .then(r => { if (r.status === 401) { window.location.href = '/login.php'; return Promise.reject('expired'); } return r.json(); })
+            .then(data => {
+                if (data.success) {
+                    alert('Deleted ' + data.deleted + ' entries. Kept last ' + data.kept_days + ' days.');
+                    loadAuditLog(1);
+                    // Reload page to refresh stats counters
+                    setTimeout(() => window.location.href = '/?tab=audit', 800);
+                } else {
+                    alert('Error: ' + (data.error || 'Unknown'));
+                }
+            })
+            .catch(e => { if (e !== 'expired') alert('Request failed'); });
         }
 
         // Session management
