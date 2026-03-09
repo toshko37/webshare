@@ -2,6 +2,12 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.7] - 2026-03-09
+
+### Bug Fix
+
+- **Chat creation no longer navigates away** – Removed the automatic page reload after creating a chat; the link is shown and copied to clipboard, and the user stays on the Chats tab
+
 ## [3.6.6] - 2026-03-09
 
 ### Bug Fix
@@ -617,6 +623,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.7  | 2026-03-09 | Fix: stay on Chats tab after creating a chat |
 |  3.6.6  | 2026-03-09 | Fix: Settings tab now persists across reloads like other tabs |
 |  3.6.5  | 2026-03-09 | Fix: tab persistence after actions and fresh login always on Files |
 |  3.6.4  | 2026-03-09 | Audit log retention management: purge entries older than 7 or 30 days |

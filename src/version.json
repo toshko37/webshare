@@ -1,6 +1,6 @@
 {
-    "version": "3.6.6",
+    "version": "3.6.7",
     "released": "2026-03-09",
-    "changelog": "Fix: Settings tab now persists across reloads like other tabs",
+    "changelog": "Fix: stay on Chats tab after creating a chat",
     "download_url": "https://webshare.techbg.net/"
 }

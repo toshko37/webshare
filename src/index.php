@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.6.6');
+define('WEBSHARE_VERSION', '3.6.7');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
@@ -5427,11 +5427,6 @@ systemctl reload apache2</code>
 
                     // Clear editor
                     quill.setText('');
-
-                    // Reload after showing URL
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 2000);
                 }
             } catch (error) {
                 // Silently fail
