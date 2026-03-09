@@ -6,18 +6,10 @@
 
 require_once __DIR__ . '/security-check.php';
 require_once __DIR__ . '/user-management.php';
-session_start();
 header('Content-Type: application/json');
 
-// Check authentication
-if (!isset($_SERVER['PHP_AUTH_USER'])) {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'error' => 'Authentication required']);
-    exit;
-}
-
-// Check if admin (configured in .config.json or first user in .htpasswd)
-if (!isAdmin()) {
+// Check if admin (security-check.php already handles session auth)
+if (!isAdmin(getCurrentUser())) {
     http_response_code(403);
     echo json_encode(['success' => false, 'error' => 'Admin access required']);
     exit;
@@ -227,14 +219,9 @@ try {
 
 // Log the update attempt
 require_once __DIR__ . '/audit-log.php';
-$auditLogger = new AuditLogger();
-$auditLogger->log(
+writeAuditLog(
     $result['success'] ? 'update_success' : 'update_failed',
-    $_SERVER['PHP_AUTH_USER'] ?? 'unknown',
-    [
-        'message' => $result['message'] ?? $result['error'] ?? 'Unknown',
-        'steps' => count($result['steps'])
-    ]
+    ($result['message'] ?? $result['error'] ?? 'Unknown') . ' (' . count($result['steps']) . ' steps)'
 );
 
 echo json_encode($result, JSON_PRETTY_PRINT);

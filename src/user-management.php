@@ -2,172 +2,181 @@
 /**
  * User Management for WebShare
  * ============================
- * Functions to manage .htpasswd users
+ * Session-based auth. Users stored in .users.json
  */
 
 // Include folder management
 require_once __DIR__ . '/folder-management.php';
 
-define('HTPASSWD_FILE', __DIR__ . '/.htpasswd');
+if (!defined('USERS_FILE'))   define('USERS_FILE',   __DIR__ . '/.users.json');
+if (!defined('SESSIONS_DIR')) define('SESSIONS_DIR', __DIR__ . '/.sessions/');
 
-/**
- * Get list of all users from .htpasswd
- */
+// ── User CRUD ─────────────────────────────────────────────────────────────
+
+function loadUsers() {
+    if (!file_exists(USERS_FILE)) return [];
+    return json_decode(file_get_contents(USERS_FILE), true) ?? [];
+}
+
+function saveUsers($users) {
+    file_put_contents(USERS_FILE, json_encode($users, JSON_PRETTY_PRINT), LOCK_EX);
+}
+
 function getUsers() {
-    $users = [];
-    if (file_exists(HTPASSWD_FILE)) {
-        $lines = file(HTPASSWD_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        foreach ($lines as $line) {
-            $parts = explode(':', $line, 2);
-            if (count($parts) === 2) {
-                $users[] = $parts[0];
-            }
-        }
-    }
-    return $users;
+    return array_keys(loadUsers());
 }
 
-/**
- * Check if user exists
- */
 function userExists($username) {
-    return in_array($username, getUsers());
+    $users = loadUsers();
+    return isset($users[$username]);
 }
 
-/**
- * Add new user (uses htpasswd command for Apache-compatible hashes)
- */
-function addUser($username, $password) {
-    // Validate username
+function addUser($username, $password, $role = 'user') {
     if (!preg_match('/^[a-zA-Z0-9_-]{3,20}$/', $username)) {
-        return ['success' => false, 'error' => 'Invalid username. Use 3-20 alphanumeric characters, - or _'];
+        return ['success' => false, 'error' => 'Невалидно потребителско име (3-20 знака, a-z 0-9 - _)'];
     }
-
     if (userExists($username)) {
-        return ['success' => false, 'error' => 'User already exists'];
+        return ['success' => false, 'error' => 'Потребителят вече съществува'];
     }
-
     if (strlen($password) < 4) {
-        return ['success' => false, 'error' => 'Password must be at least 4 characters'];
+        return ['success' => false, 'error' => 'Паролата трябва да е поне 4 символа'];
     }
-
-    // Use htpasswd command for Apache-compatible hash
-    $escapedPassword = escapeshellarg($password);
-    $escapedUsername = escapeshellarg($username);
-    $escapedFile = escapeshellarg(HTPASSWD_FILE);
-
-    $cmd = "htpasswd -b {$escapedFile} {$escapedUsername} {$escapedPassword} 2>&1";
-    exec($cmd, $output, $returnCode);
-
-    if ($returnCode === 0) {
-        // Ensure file is readable by Apache
-        chmod(HTPASSWD_FILE, 0644);
-
-        // Create user folder
-        createUserFolder($username);
-
-        return ['success' => true];
-    }
-
-    return ['success' => false, 'error' => 'Failed to add user: ' . implode(' ', $output)];
+    $users = loadUsers();
+    $users[$username] = [
+        'password_hash' => password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]),
+        'role'          => $role,
+        'created'       => time()
+    ];
+    saveUsers($users);
+    createUserFolder($username);
+    return ['success' => true];
 }
 
-/**
- * Change user password (uses htpasswd command)
- */
 function changePassword($username, $newPassword) {
     if (!userExists($username)) {
-        return ['success' => false, 'error' => 'User not found'];
+        return ['success' => false, 'error' => 'Потребителят не е намерен'];
     }
-
     if (strlen($newPassword) < 4) {
-        return ['success' => false, 'error' => 'Password must be at least 4 characters'];
+        return ['success' => false, 'error' => 'Паролата трябва да е поне 4 символа'];
     }
-
-    // Use htpasswd command to update password
-    $escapedPassword = escapeshellarg($newPassword);
-    $escapedUsername = escapeshellarg($username);
-    $escapedFile = escapeshellarg(HTPASSWD_FILE);
-
-    $cmd = "htpasswd -b {$escapedFile} {$escapedUsername} {$escapedPassword} 2>&1";
-    exec($cmd, $output, $returnCode);
-
-    if ($returnCode === 0) {
-        // Ensure file is readable by Apache
-        chmod(HTPASSWD_FILE, 0644);
-        return ['success' => true];
-    }
-
-    return ['success' => false, 'error' => 'Failed to change password: ' . implode(' ', $output)];
+    $users = loadUsers();
+    $users[$username]['password_hash'] = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 12]);
+    saveUsers($users);
+    return ['success' => true];
 }
 
-/**
- * Delete user (uses htpasswd -D command)
- */
 function deleteUser($username) {
     if (!userExists($username)) {
-        return ['success' => false, 'error' => 'User not found'];
+        return ['success' => false, 'error' => 'Потребителят не е намерен'];
     }
-
-    // Don't allow deleting the last user
-    $users = getUsers();
+    $users = loadUsers();
     if (count($users) <= 1) {
-        return ['success' => false, 'error' => 'Cannot delete the last user'];
+        return ['success' => false, 'error' => 'Не може да се изтрие последният потребител'];
     }
+    unset($users[$username]);
+    saveUsers($users);
+    // Close all sessions for deleted user
+    logoffAllForUser($username);
+    return ['success' => true];
+}
 
-    // Use htpasswd -D to delete user
-    $escapedUsername = escapeshellarg($username);
-    $escapedFile = escapeshellarg(HTPASSWD_FILE);
-
-    $cmd = "htpasswd -D {$escapedFile} {$escapedUsername} 2>&1";
-    exec($cmd, $output, $returnCode);
-
-    if ($returnCode === 0) {
-        // Ensure file is readable by Apache
-        chmod(HTPASSWD_FILE, 0644);
-        return ['success' => true];
-    }
-
-    return ['success' => false, 'error' => 'Failed to delete user: ' . implode(' ', $output)];
+function setUserRole($username, $role) {
+    if (!userExists($username)) return false;
+    $users = loadUsers();
+    $users[$username]['role'] = $role;
+    saveUsers($users);
+    return true;
 }
 
 /**
- * Get current authenticated user
+ * Get current authenticated user (from session)
  */
 function getCurrentUser() {
-    return $_SERVER['PHP_AUTH_USER'] ?? $_SERVER['REMOTE_USER'] ?? 'unknown';
+    return $_SESSION['username'] ?? 'unknown';
 }
 
 /**
- * Check if current user is an admin
- * Admins are defined in .config.json under "admin_users" array
- * If not configured, first user in .htpasswd is considered admin
+ * Check if user is admin (role = 'admin' in .users.json)
  */
 function isAdmin($username = null) {
-    if ($username === null) {
-        $username = getCurrentUser();
-    }
-
-    // Load config
-    $configFile = __DIR__ . '/.config.json';
-    $config = [];
-    if (file_exists($configFile)) {
-        $config = json_decode(file_get_contents($configFile), true) ?? [];
-    }
-
-    // Check if admin_users is configured
-    if (isset($config['admin_users']) && is_array($config['admin_users'])) {
-        return in_array($username, $config['admin_users']);
-    }
-
-    // Fallback: first user in .htpasswd is admin
-    $users = getUsers();
-    return !empty($users) && $users[0] === $username;
+    if ($username === null) $username = getCurrentUser();
+    $users = loadUsers();
+    return ($users[$username]['role'] ?? '') === 'admin';
 }
 
-// ============================================
-// File Ownership Tracking
-// ============================================
+// ── Session Management ────────────────────────────────────────────────────
+
+/**
+ * Get all active sessions with metadata
+ * Returns array of session info, newest first
+ */
+function getSessions() {
+    if (!is_dir(SESSIONS_DIR)) return [];
+    $sessions = [];
+    $currentSessId = session_id();
+
+    foreach (glob(SESSIONS_DIR . '*.json') as $file) {
+        $meta = json_decode(file_get_contents($file), true);
+        if (!$meta) continue;
+        $sessId = basename($file, '.json');
+        $sessions[] = [
+            'id'          => $sessId,
+            'username'    => $meta['username'] ?? '?',
+            'ip'          => $meta['ip'] ?? '?',
+            'user_agent'  => $meta['user_agent'] ?? '',
+            'created'     => $meta['created'] ?? 0,
+            'last_active' => $meta['last_active'] ?? 0,
+            'remember_me' => $meta['remember_me'] ?? false,
+            'is_current'  => ($sessId === $currentSessId)
+        ];
+    }
+
+    usort($sessions, fn($a, $b) => $b['last_active'] - $a['last_active']);
+    return $sessions;
+}
+
+/**
+ * Close a specific session by ID
+ */
+function closeSession($sessId) {
+    // Validate session ID format (alphanumeric)
+    if (!preg_match('/^[a-zA-Z0-9,-]+$/', $sessId)) return false;
+    $file = SESSIONS_DIR . $sessId . '.json';
+    if (!file_exists($file)) return false;
+    unlink($file);
+    return true;
+}
+
+/**
+ * Logoff all sessions (all users)
+ */
+function logoffAll() {
+    if (!is_dir(SESSIONS_DIR)) return 0;
+    $count = 0;
+    foreach (glob(SESSIONS_DIR . '*.json') as $file) {
+        unlink($file);
+        $count++;
+    }
+    return $count;
+}
+
+/**
+ * Logoff all sessions for a specific user
+ */
+function logoffAllForUser($username) {
+    if (!is_dir(SESSIONS_DIR)) return 0;
+    $count = 0;
+    foreach (glob(SESSIONS_DIR . '*.json') as $file) {
+        $meta = json_decode(file_get_contents($file), true);
+        if (($meta['username'] ?? '') === $username) {
+            unlink($file);
+            $count++;
+        }
+    }
+    return $count;
+}
+
+// ── File Ownership Tracking ───────────────────────────────────────────────
 
 define('FILES_META_FILE', __DIR__ . '/.files-meta.json');
 

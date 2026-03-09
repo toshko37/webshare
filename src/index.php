@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.5.6');
+define('WEBSHARE_VERSION', '3.6.0');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
@@ -20,8 +20,8 @@ if (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on') {
 // Dynamic base URL for installation scripts
 $baseUrl = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] === 'on' ? 'https' : 'http') . '://' . ($_SERVER['HTTP_HOST'] ?? 'your-server.com');
 
-// Start session for login tracking
-session_start();
+// Session already started by security-check.php
+if (session_status() === PHP_SESSION_NONE) { session_start(); }
 
 // CSRF Protection - generate token if not exists
 if (empty($_SESSION['csrf_token'])) {
@@ -92,10 +92,8 @@ $canCreateSubfolder = (getFolderDepth($currentFolder) < MAX_SUBFOLDER_DEPTH);
 // Get all subfolders for the current user's base folder (for move modal)
 $allUserSubfolders = getAllSubfoldersRecursive($baseFolder, $currentUser);
 
-// Log login once per session and regenerate session ID (prevent session fixation)
+// Log page access once per session
 if (!isset($_SESSION['login_logged']) || $_SESSION['login_logged'] !== $currentUser) {
-    // Regenerate session ID to prevent session fixation attacks
-    session_regenerate_id(true);
     writeAuditLog('login', "User logged in");
     $_SESSION['login_logged'] = $currentUser;
 }
@@ -276,6 +274,60 @@ if (isset($_GET['audit_action']) && $isAdmin) {
         header('Content-Type: text/csv');
         header('Content-Disposition: attachment; filename="audit-log-' . date('Y-m-d') . '.csv"');
         echo exportAuditLogCSV();
+        exit;
+    }
+
+    echo json_encode(['success' => false, 'error' => 'Invalid action']);
+    exit;
+}
+
+// Handle session management AJAX (admin + self)
+if (isset($_GET['session_action'])) {
+    header('Content-Type: application/json');
+    $sAction = $_GET['session_action'];
+
+    if ($sAction === 'list' && $isAdmin) {
+        echo json_encode(['success' => true, 'sessions' => getSessions()]);
+        exit;
+    }
+
+    if ($sAction === 'close' && $_SERVER['REQUEST_METHOD'] === 'POST' && validateCsrf()) {
+        $sid = $_POST['session_id'] ?? '';
+        // Admin can close any session; non-admin can only close their own
+        $sessions = getSessions();
+        $target = null;
+        foreach ($sessions as $s) { if ($s['id'] === $sid) { $target = $s; break; } }
+        if ($target && ($isAdmin || $target['username'] === $currentUser)) {
+            closeSession($sid);
+            writeAuditLog('session_close', "Closed session for " . ($target['username'] ?? '?'));
+            echo json_encode(['success' => true]);
+        } else {
+            echo json_encode(['success' => false, 'error' => 'Not allowed']);
+        }
+        exit;
+    }
+
+    if ($sAction === 'logoff_all' && $_SERVER['REQUEST_METHOD'] === 'POST' && validateCsrf()) {
+        if ($isAdmin) {
+            logoffAll();
+            writeAuditLog('logoff_all', 'Logged off all sessions');
+        } else {
+            logoffAllForUser($currentUser);
+            writeAuditLog('logoff_all', 'Logged off all own sessions');
+        }
+        echo json_encode(['success' => true, 'redirect' => '/login.php']);
+        exit;
+    }
+
+    if ($sAction === 'change_my_password' && $_SERVER['REQUEST_METHOD'] === 'POST' && validateCsrf()) {
+        $newPw = $_POST['new_password'] ?? '';
+        $result = changePassword($currentUser, $newPw);
+        if ($result['success']) {
+            writeAuditLog('user_password', "User changed own password");
+            echo json_encode(['success' => true]);
+        } else {
+            echo json_encode(['success' => false, 'error' => $result['error']]);
+        }
         exit;
     }
 
@@ -2387,7 +2439,7 @@ function getRecentChanges($limit = 8) {
         <?php endif; ?>
         <div class="user-header">
             <span class="current-user">👤 <?= htmlspecialchars($currentUser) ?></span>
-            <a href="?logout=1" class="logout-link" onclick="return doLogout()">🚪 Logout</a>
+            <a href="/logout.php" class="logout-link">🚪 Logout</a>
         </div>
         <h1><a href="#" onclick="showAboutModal(); return false;" style="color: inherit; text-decoration: none;" title="About WebShare">WebShare</a> <?php if ($isAdmin): ?><a href="#" id="versionLink" onclick="showUpdateModal(); return false;" style="font-size: 14px; color: #888; font-weight: normal; text-decoration: none;" title="Check for Updates">v<?= WEBSHARE_VERSION ?></a><?php else: ?><span style="font-size: 14px; color: #888; font-weight: normal;">v<?= WEBSHARE_VERSION ?></span><?php endif; ?></h1>
         <p class="subtitle">Simple File Sharing System</p>
@@ -2407,6 +2459,7 @@ function getRecentChanges($limit = 8) {
             <button class="tab" onclick="switchTab('help')">❓ Help</button>
             <?php if ($isAdmin): ?><button class="tab" onclick="switchTab('settings')">⚙️ Settings</button><?php endif; ?>
             <?php if ($isAdmin): ?><button class="tab" onclick="switchTab('audit')">📊 Audit Log</button><?php endif; ?>
+            <button class="tab" onclick="switchTab('sessions')">🔐 Sessions</button>
         </div>
 
         <!-- Files Tab -->
@@ -3568,6 +3621,39 @@ systemctl reload apache2</code>
         </div><!-- End Audit Log Tab -->
 
         <?php endif; ?>
+
+        <!-- Sessions Tab -->
+        <div class="tab-content" id="sessions-tab">
+            <div class="settings-section">
+                <h2>🔐 Sessions</h2>
+                <p style="color:#666; margin-bottom:20px;">Manage active login sessions. Closing a session will log out that device immediately.</p>
+
+                <div id="sessions-list">
+                    <p style="color:#999;">Loading sessions...</p>
+                </div>
+
+                <div style="margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
+                    <?php if ($isAdmin): ?>
+                    <button class="btn" style="background:#dc3545;" onclick="sessionsLogoffAll()">🚫 Logoff ALL Sessions</button>
+                    <?php else: ?>
+                    <button class="btn" style="background:#dc3545;" onclick="sessionsLogoffAll()">🚫 Logoff My Sessions</button>
+                    <?php endif; ?>
+                    <button class="btn btn-save" onclick="loadSessions()">🔄 Refresh</button>
+                </div>
+
+                <div style="margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px;">
+                    <h3>🔑 Change My Password</h3>
+                    <form id="changeMyPasswordForm" onsubmit="submitChangeMyPassword(event)" style="max-width: 400px; margin-top: 15px;">
+                        <div class="setting-row">
+                            <label>New Password:</label>
+                            <input type="password" id="myNewPassword" placeholder="Min 4 characters" required minlength="4" style="padding: 10px; border: 1px solid #ddd; border-radius: 8px; width: 100%;">
+                        </div>
+                        <div id="changeMyPasswordMsg" style="display:none; margin: 10px 0;"></div>
+                        <button type="submit" class="btn btn-save" style="margin-top:10px;">💾 Change Password</button>
+                    </form>
+                </div>
+            </div>
+        </div><!-- End Sessions Tab -->
     </div>
 
     <script src="assets/quill/quill.js"></script>
@@ -3748,29 +3834,96 @@ systemctl reload apache2</code>
             window.location.href = '?audit_action=export';
         }
 
-        // Logout function for HTTP Basic Auth
-        function doLogout() {
-            // Clear credentials by making request with wrong credentials
-            var xhr = new XMLHttpRequest();
-            xhr.open('GET', window.location.href, true, 'logout', 'logout');
-            xhr.onreadystatechange = function() {
-                if (xhr.readyState === 4) {
-                    window.location.href = '/u';
-                }
-            };
-            xhr.send();
+        // Session management
+        function loadSessions() {
+            fetch('?session_action=list')
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.success) { document.getElementById('sessions-list').innerHTML = '<p style="color:#dc3545;">Error loading sessions</p>'; return; }
+                    renderSessions(data.sessions);
+                })
+                .catch(() => {
+                    document.getElementById('sessions-list').innerHTML = '<p style="color:#dc3545;">Failed to load sessions</p>';
+                });
+        }
 
-            // Also try the modern way
-            if (document.execCommand) {
-                document.execCommand('ClearAuthenticationCache', false);
+        function renderSessions(sessions) {
+            if (!sessions || sessions.length === 0) {
+                document.getElementById('sessions-list').innerHTML = '<p style="color:#999;">No active sessions found.</p>';
+                return;
             }
+            let html = '<table style="width:100%; border-collapse:collapse; font-size:14px;">';
+            html += '<thead><tr style="background:#f5f5f5;"><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">User</th><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">IP</th><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">Device</th><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">Last Active</th><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">Remember</th><th style="padding:10px; border-bottom:2px solid #eee;"></th></tr></thead><tbody>';
+            sessions.forEach(s => {
+                const isCurrent = s.current;
+                const bg = isCurrent ? '#e8f5e9' : 'white';
+                const ua = s.user_agent || '';
+                let device = ua.length > 60 ? ua.substring(0, 60) + '…' : ua;
+                const lastActive = s.last_active ? new Date(s.last_active * 1000).toLocaleString() : '?';
+                const remember = s.remember_me ? '✅' : '—';
+                html += `<tr style="background:${bg}; border-bottom:1px solid #f0f0f0;">`;
+                html += `<td style="padding:10px;">${escHtml(s.username)}${isCurrent ? ' <span style="background:#4CAF50;color:white;padding:2px 6px;border-radius:10px;font-size:11px;">current</span>' : ''}</td>`;
+                html += `<td style="padding:10px;">${escHtml(s.ip || '?')}</td>`;
+                html += `<td style="padding:10px; color:#666; font-size:12px;">${escHtml(device)}</td>`;
+                html += `<td style="padding:10px;">${lastActive}</td>`;
+                html += `<td style="padding:10px; text-align:center;">${remember}</td>`;
+                html += `<td style="padding:10px;">`;
+                if (!isCurrent) {
+                    html += `<button class="btn" style="background:#dc3545;padding:5px 12px;font-size:12px;" onclick="closeSession('${escHtml(s.id)}')">Close</button>`;
+                }
+                html += `</td></tr>`;
+            });
+            html += '</tbody></table>';
+            document.getElementById('sessions-list').innerHTML = html;
+        }
 
-            // Redirect to public page
-            setTimeout(function() {
-                window.location.href = '/u';
-            }, 100);
+        function closeSession(sessionId) {
+            if (!confirm('Close this session?')) return;
+            fetch('?session_action=close', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'csrf_token=' + encodeURIComponent(csrfToken) + '&session_id=' + encodeURIComponent(sessionId)
+            }).then(r => r.json()).then(data => {
+                if (data.success) loadSessions();
+                else alert('Error: ' + (data.error || 'Unknown'));
+            });
+        }
 
-            return false;
+        function sessionsLogoffAll() {
+            if (!confirm('Log off ALL sessions? You will be redirected to login.')) return;
+            fetch('?session_action=logoff_all', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'csrf_token=' + encodeURIComponent(csrfToken)
+            }).then(r => r.json()).then(data => {
+                if (data.success) window.location.href = data.redirect || '/login.php';
+                else alert('Error: ' + (data.error || 'Unknown'));
+            });
+        }
+
+        function submitChangeMyPassword(e) {
+            e.preventDefault();
+            const pw = document.getElementById('myNewPassword').value;
+            const msgEl = document.getElementById('changeMyPasswordMsg');
+            fetch('?session_action=change_my_password', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'csrf_token=' + encodeURIComponent(csrfToken) + '&new_password=' + encodeURIComponent(pw)
+            }).then(r => r.json()).then(data => {
+                msgEl.style.display = 'block';
+                if (data.success) {
+                    msgEl.style.background = '#e8f5e9'; msgEl.style.color = '#2e7d32'; msgEl.style.padding = '8px 12px'; msgEl.style.borderRadius = '6px';
+                    msgEl.textContent = 'Password changed successfully.';
+                    document.getElementById('myNewPassword').value = '';
+                } else {
+                    msgEl.style.background = '#fee2e2'; msgEl.style.color = '#dc2626'; msgEl.style.padding = '8px 12px'; msgEl.style.borderRadius = '6px';
+                    msgEl.textContent = data.error || 'Error changing password.';
+                }
+            });
+        }
+
+        function escHtml(str) {
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         }
 
         // Drag and drop functionality
@@ -5066,7 +5219,7 @@ systemctl reload apache2</code>
 
             // Add active class to correct button
             document.querySelectorAll('.tab').forEach(btn => {
-                const tabMap = {'files': 'Files', 'texts': 'Chats', 'help': 'Help', 'settings': 'Settings', 'audit': 'Audit'};
+                const tabMap = {'files': 'Files', 'texts': 'Chats', 'help': 'Help', 'settings': 'Settings', 'audit': 'Audit', 'sessions': 'Sessions'};
                 if (btn.textContent.includes(tabMap[tabName])) {
                     btn.classList.add('active');
                 }
@@ -5080,6 +5233,11 @@ systemctl reload apache2</code>
             // Load audit log when audit tab is opened
             if (tabName === 'audit' && typeof loadAuditLog === 'function') {
                 loadAuditLog(1);
+            }
+
+            // Load sessions when sessions tab is opened
+            if (tabName === 'sessions' && typeof loadSessions === 'function') {
+                loadSessions();
             }
         }
 

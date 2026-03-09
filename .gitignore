@@ -66,6 +66,9 @@ src/texts
 src/backups
 src/vendor
 src/.htpasswd
+src/.users.json
+src/.sessions/
+src/.login-attempts.json
 src/.config.json
 src/.geo.json
 src/.tokens.json

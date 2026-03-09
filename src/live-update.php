@@ -18,7 +18,6 @@ set_time_limit(120); // Allow 2 minutes for update
 // Clean any accidental output
 ob_end_clean();
 
-session_start();
 header('Content-Type: application/json');
 header('Cache-Control: no-cache');
 
@@ -46,15 +45,8 @@ register_shutdown_function(function() {
     }
 });
 
-// Check authentication
-if (!isset($_SERVER['PHP_AUTH_USER'])) {
-    http_response_code(401);
-    echo json_encode(['success' => false, 'error' => 'Authentication required']);
-    exit;
-}
-
-// Check if admin (configured in .config.json or first user in .htpasswd)
-if (!isAdmin()) {
+// Check if admin (security-check.php already handles session auth)
+if (!isAdmin(getCurrentUser())) {
     http_response_code(403);
     echo json_encode(['success' => false, 'error' => 'Admin access required']);
     exit;
@@ -109,7 +101,10 @@ $phpFiles = [
     'get-speedtest.php',
     'get-update.php',
     'get-update-script.php',
-    'security-headers.php'
+    'security-headers.php',
+    'login.php',
+    'logout.php',
+    'security-check.php'
 ];
 
 $otherFiles = [

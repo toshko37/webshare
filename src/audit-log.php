@@ -66,7 +66,7 @@ function writeAuditLog($action, $details = '', $user = null) {
 
     // Get user info
     if ($user === null) {
-        $user = $_SERVER['PHP_AUTH_USER'] ?? 'anonymous';
+        $user = $_SESSION['username'] ?? 'anonymous';
     }
 
     // Get IP and country
@@ -367,7 +367,7 @@ function clearAuditLog() {
         [
             'timestamp' => date('Y-m-d H:i:s'),
             'unix_time' => time(),
-            'user' => $_SERVER['PHP_AUTH_USER'] ?? 'admin',
+            'user' => $_SESSION['username'] ?? 'admin',
             'action' => 'audit_cleared',
             'details' => 'Audit log was cleared',
             'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',

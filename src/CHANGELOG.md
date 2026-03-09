@@ -2,6 +2,36 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.0] - 2026-03-09
+
+### Session-Based Authentication (replaces HTTP Basic Auth)
+
+- **Login page** - New `/login.php` with username/password form, rate limiting (5 attempts, 15-min lockout), and "Remember me" (30-day cookie)
+- **Logout** - Proper `/logout.php` that clears session and remember-me cookie
+- **Multi-user support** - Users stored in `.users.json` with bcrypt-hashed passwords
+- **Remember me** - Secure 30-day cookie with server-side token validation
+- **Session tracking** - Each login creates a `.sessions/{id}.json` file with IP, device, timestamp
+
+### Sessions Management Tab
+
+- **Active sessions list** - View all sessions with username, IP, device/browser, last active time
+- **Close session** - Terminate any specific session remotely (admin can close any, users can close own)
+- **Logoff ALL** - Instantly revoke all active sessions (admin: all users; regular: own sessions)
+- **Change own password** - Self-service password change without admin
+
+### Migration & First-Run
+
+- **Auto-migration wizard** - Detects old `.htpasswd` on first access after update, prompts for new passwords
+- **First-run setup** - If no users exist, shows admin account creation form automatically
+
+### Other Changes
+
+- **Audit log** - Fixed to use PHP session username instead of HTTP Basic Auth
+- **Update system** - Removed HTTP Basic Auth checks from `live-update.php` and `do-update.php`
+- **Live update** - Added `login.php`, `logout.php`, `security-check.php` to auto-update file list
+- **`.htaccess`** - Removed all Basic Auth directives; session auth handles security
+- **`.gitignore`** - Added `.users.json`, `.sessions/`, `.login-attempts.json`
+
 ## [3.5.6] - 2026-02-09
 
 ### Chat Fixes
@@ -532,6 +562,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.0  | 2026-03-09 | Switch to PHP session-based authentication with multi-user support |
 |  3.5.6  | 2026-02-09 | Chat: smart expiration, selection-safe polling, copy line breaks |
 |  3.5.0  | 2026-02-01 | Project restructuring - src/ folder, audit log rotation, chat buttons |
 |  3.4.1  | 2026-02-01 | Beta update server option |
