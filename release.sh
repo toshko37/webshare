@@ -257,6 +257,9 @@ echo -e "  ${GREEN}✓${NC} Committed"
 git push
 echo -e "  ${GREEN}✓${NC} Pushed"
 
+# Clear local version cache so the dev server sees the new version immediately
+rm -f "$SRC_DIR/.version-check.json"
+
 # ============================================================
 # Step 5: Create GitHub release
 # ============================================================
