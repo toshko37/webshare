@@ -25,7 +25,7 @@ function loadUsers() {
     return json_decode(file_get_contents(USERS_FILE), true) ?? [];
 }
 
-function getClientIp() {
+function _loginGetClientIp() {
     return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
 }
 
@@ -123,7 +123,7 @@ function tryRememberMe() {
 
         $newMeta = [
             'username'        => $meta['username'],
-            'ip'              => getClientIp(),
+            'ip'              => _loginGetClientIp(),
             'user_agent'      => $_SERVER['HTTP_USER_AGENT'] ?? '',
             'created'         => time(),
             'last_active'     => time(),
@@ -150,7 +150,7 @@ if (!isset($_SESSION['username']) && tryRememberMe()) {
 }
 
 $error = '';
-$ip = getClientIp();
+$ip = _loginGetClientIp();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username   = trim($_POST['username'] ?? '');
