@@ -1,6 +1,6 @@
 {
-    "version": "3.6.13",
+    "version": "3.6.14",
     "released": "2026-03-10",
-    "changelog": "Fix: country and user-agent missing in audit purge/clear entries",
+    "changelog": "Fix: delete user folder and files when user is deleted",
     "download_url": "https://webshare.techbg.net/"
 }

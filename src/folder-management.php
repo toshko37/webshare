@@ -119,6 +119,15 @@ function canAccessFolder($username, $folderName) {
  * @param string $username Username
  * @return bool Success
  */
+function _deleteDirRecursive($path) {
+    if (!is_dir($path)) return;
+    foreach (array_diff(scandir($path), ['.', '..']) as $item) {
+        $full = $path . '/' . $item;
+        is_dir($full) ? _deleteDirRecursive($full) : unlink($full);
+    }
+    rmdir($path);
+}
+
 function createUserFolder($username) {
     $folderPath = FILES_BASE_DIR . $username;
 
@@ -154,14 +163,10 @@ function deleteUserFolder($username, $force = false) {
         return false; // Folder not empty
     }
 
-    // Delete all files if force
+    // Recursively delete everything if force
     if ($force) {
-        foreach ($files as $file) {
-            $filePath = $folderPath . '/' . $file;
-            if (is_file($filePath)) {
-                unlink($filePath);
-            }
-        }
+        _deleteDirRecursive($folderPath);
+        return !is_dir($folderPath);
     }
 
     return rmdir($folderPath);

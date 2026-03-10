@@ -77,6 +77,10 @@ function deleteUser($username) {
     saveUsers($users);
     // Close all sessions for deleted user
     logoffAllForUser($username);
+    // Delete user's folder and all files inside
+    if (function_exists('deleteUserFolder')) {
+        deleteUserFolder($username, true);
+    }
     return ['success' => true];
 }
 

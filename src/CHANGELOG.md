@@ -2,6 +2,12 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.14] - 2026-03-10
+
+### User Management
+
+- **Delete user folder on deletion** – When a user is deleted, their files folder and all contents (including subfolders) are permanently deleted
+
 ## [3.6.13] - 2026-03-10
 
 ### Bug Fix
@@ -660,6 +666,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.14  | 2026-03-10 | Fix: delete user folder and files when user is deleted |
 |  3.6.13  | 2026-03-10 | Fix: country and user-agent missing in audit purge/clear entries |
 |  3.6.12  | 2026-03-10 | Fix: admin folder visibility and orphaned folder cleanup |
 |  3.6.11  | 2026-03-10 | Fix: clear OPcache after live update so version updates immediately |
