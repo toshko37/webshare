@@ -371,8 +371,8 @@ function clearAuditLog() {
             'action' => 'audit_cleared',
             'details' => 'Audit log was cleared',
             'ip' => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
-            'country' => 'N/A',
-            'user_agent' => ''
+            'country' => function_exists('getCountryFromIP') ? (getCountryFromIP($_SERVER['REMOTE_ADDR'] ?? '') ?? 'N/A') : 'N/A',
+            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? ''
         ]
     ], JSON_PRETTY_PRINT));
 }
@@ -401,8 +401,8 @@ function purgeAuditLog($keepDays) {
         'action'     => 'audit_purged',
         'details'    => "Deleted $deleted entries older than $keepDays days",
         'ip'         => $_SERVER['REMOTE_ADDR'] ?? 'unknown',
-        'country'    => 'N/A',
-        'user_agent' => ''
+        'country'    => function_exists('getCountryFromIP') ? (getCountryFromIP($_SERVER['REMOTE_ADDR'] ?? '') ?? 'N/A') : 'N/A',
+        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? ''
     ]);
 
     // Remove all existing archive files

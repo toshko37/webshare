@@ -2,6 +2,12 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.13] - 2026-03-10
+
+### Bug Fix
+
+- **Country lookup in audit purge/clear** – `audit_purged` and `audit_cleared` entries now correctly resolve the country from the IP address instead of always showing "N/A"; user agent is also recorded
+
 ## [3.6.12] - 2026-03-10
 
 ### Bug Fixes
@@ -654,6 +660,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.13  | 2026-03-10 | Fix: country and user-agent missing in audit purge/clear entries |
 |  3.6.12  | 2026-03-10 | Fix: admin folder visibility and orphaned folder cleanup |
 |  3.6.11  | 2026-03-10 | Fix: clear OPcache after live update so version updates immediately |
 |  3.6.10  | 2026-03-10 | Update: block all interactions with overlay during live update |

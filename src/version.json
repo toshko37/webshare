@@ -1,6 +1,6 @@
 {
-    "version": "3.6.12",
+    "version": "3.6.13",
     "released": "2026-03-10",
-    "changelog": "Fix: admin folder visibility and orphaned folder cleanup",
+    "changelog": "Fix: country and user-agent missing in audit purge/clear entries",
     "download_url": "https://webshare.techbg.net/"
 }
