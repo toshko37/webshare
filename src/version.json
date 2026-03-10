@@ -1,6 +1,6 @@
 {
-    "version": "3.6.9",
+    "version": "3.6.10",
     "released": "2026-03-10",
-    "changelog": "Fix: tab no longer reverts to Settings after reload",
+    "changelog": "Update: block all interactions with overlay during live update",
     "download_url": "https://webshare.techbg.net/"
 }

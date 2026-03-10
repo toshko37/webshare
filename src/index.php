@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.6.9');
+define('WEBSHARE_VERSION', '3.6.10');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
@@ -1704,6 +1704,9 @@ function getRecentChanges($limit = 8) {
         }
         #webDownloadProgress {
             margin-top: 15px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
         @keyframes pulse {
             0%, 100% { opacity: 1; }
@@ -4934,6 +4937,22 @@ systemctl reload apache2</code>
             }
         }
 
+        function showUpdateOverlay(msg) {
+            let ov = document.getElementById('update-overlay');
+            if (!ov) {
+                ov = document.createElement('div');
+                ov.id = 'update-overlay';
+                ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-size:18px;gap:16px;';
+                ov.innerHTML = '<div style="width:48px;height:48px;border:5px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite;"></div><div id="update-overlay-msg"></div>';
+                document.body.appendChild(ov);
+            }
+            document.getElementById('update-overlay-msg').textContent = msg || 'Updating…';
+        }
+        function hideUpdateOverlay() {
+            const ov = document.getElementById('update-overlay');
+            if (ov) ov.remove();
+        }
+
         async function doLiveUpdate() {
             if (!confirm('This will update WebShare from webshare.techbg.net. Continue?')) return;
 
@@ -4943,6 +4962,7 @@ systemctl reload apache2</code>
 
             liveUpdateBtn.disabled = true;
             checkBtn.disabled = true;
+            showUpdateOverlay('Updating WebShare… please wait');
 
             // Show progress
             content.innerHTML = '<div style="text-align: left; font-size: 13px;">' +
@@ -4969,6 +4989,8 @@ systemctl reload apache2</code>
                     html += '<p style="color: #666; text-align: center; font-size: 12px;">Reloading in 2 seconds...</p>';
                     html += '</div>';
                     content.innerHTML = html;
+                    hideUpdateOverlay();
+                    showUpdateOverlay('Update complete! Reloading…');
                     setTimeout(() => location.reload(true), 2000);
                 } else {
                     // Show error with steps
@@ -4984,11 +5006,13 @@ systemctl reload apache2</code>
                     html += '<p style="color: #666; text-align: center; font-size: 12px;">' + (result.error || 'Unknown error') + '</p>';
                     html += '</div>';
                     content.innerHTML = html;
+                    hideUpdateOverlay();
                     liveUpdateBtn.disabled = false;
                     checkBtn.disabled = false;
                 }
             } catch (error) {
                 content.innerHTML = '<p style="text-align: center; color: #f44336;">Update failed: ' + error.message + '</p>';
+                hideUpdateOverlay();
                 liveUpdateBtn.disabled = false;
                 checkBtn.disabled = false;
             }
