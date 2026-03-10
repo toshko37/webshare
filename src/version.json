@@ -1,6 +1,6 @@
 {
-    "version": "3.6.11",
+    "version": "3.6.12",
     "released": "2026-03-10",
-    "changelog": "Fix: clear OPcache after live update so version updates immediately",
+    "changelog": "Fix: admin folder visibility and orphaned folder cleanup",
     "download_url": "https://webshare.techbg.net/"
 }

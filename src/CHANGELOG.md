@@ -2,6 +2,13 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.12] - 2026-03-10
+
+### Bug Fixes
+
+- **Admin folder visibility** – Any admin user (not just a user literally named "admin") can now see and manage all users' folders
+- **Orphaned folders hidden** – Folders belonging to deleted users no longer appear in the folder list
+
 ## [3.6.11] - 2026-03-10
 
 ### Bug Fix
@@ -647,6 +654,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.12  | 2026-03-10 | Fix: admin folder visibility and orphaned folder cleanup |
 |  3.6.11  | 2026-03-10 | Fix: clear OPcache after live update so version updates immediately |
 |  3.6.10  | 2026-03-10 | Update: block all interactions with overlay during live update |
 |  3.6.9  | 2026-03-10 | Fix: tab no longer reverts to Settings after reload |

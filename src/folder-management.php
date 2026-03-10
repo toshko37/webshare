@@ -63,13 +63,17 @@ function getUserFolders($username) {
         ];
     }
 
-    // Admin can see all user folders
-    if ($username === 'admin') {
+    // Admin can see all user folders (only for existing users)
+    if (isAdmin($username)) {
+        $existingUsers = array_keys(loadUsers());
         $allFolders = glob(FILES_BASE_DIR . '*', GLOB_ONLYDIR);
         foreach ($allFolders as $folder) {
             $folderName = basename($folder);
-            // Skip public and admin's own folder (already added)
-            if ($folderName === PUBLIC_FOLDER || $folderName === 'admin') {
+            // Skip public and own folder (already added), and folders without a user
+            if ($folderName === PUBLIC_FOLDER || $folderName === $username) {
+                continue;
+            }
+            if (!in_array($folderName, $existingUsers)) {
                 continue;
             }
             $folders[] = [
