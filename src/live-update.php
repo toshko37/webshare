@@ -299,6 +299,11 @@ try {
     // Clear version cache
     @unlink($installDir . '/.version-check.json');
 
+    // Clear OPcache so new PHP files are loaded immediately
+    if (function_exists('opcache_reset')) {
+        @opcache_reset();
+    }
+
     // Cleanup old backups (keep last 3)
     $backups = glob($installDir . '/backups/pre-update-*');
     usort($backups, function($a, $b) { return filemtime($b) - filemtime($a); });

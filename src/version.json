@@ -1,6 +1,6 @@
 {
-    "version": "3.6.10",
+    "version": "3.6.11",
     "released": "2026-03-10",
-    "changelog": "Update: block all interactions with overlay during live update",
+    "changelog": "Fix: clear OPcache after live update so version updates immediately",
     "download_url": "https://webshare.techbg.net/"
 }

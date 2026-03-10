@@ -2,6 +2,12 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.11] - 2026-03-10
+
+### Bug Fix
+
+- **OPcache cleared after live update** – After installing new files, `opcache_reset()` is called so PHP serves the updated files immediately instead of the cached old versions; fixes the issue where version still showed the old number after a successful update
+
 ## [3.6.10] - 2026-03-10
 
 ### Update System
@@ -641,6 +647,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.11  | 2026-03-10 | Fix: clear OPcache after live update so version updates immediately |
 |  3.6.10  | 2026-03-10 | Update: block all interactions with overlay during live update |
 |  3.6.9  | 2026-03-10 | Fix: tab no longer reverts to Settings after reload |
 |  3.6.8  | 2026-03-09 | Fix: refresh chat list after creation while staying on Chats tab |
