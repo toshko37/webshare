@@ -2,6 +2,12 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.9] - 2026-03-10
+
+### Bug Fix
+
+- **Tab navigation after reload** – Switching tabs now clears URL parameters (e.g. `?tab=settings&user_msg=...` from Settings actions); any subsequent page reload returns to the correct tab instead of re-applying the old URL
+
 ## [3.6.8] - 2026-03-09
 
 ### Bug Fix
@@ -629,6 +635,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.9  | 2026-03-10 | Fix: tab no longer reverts to Settings after reload |
 |  3.6.8  | 2026-03-09 | Fix: refresh chat list after creation while staying on Chats tab |
 |  3.6.7  | 2026-03-09 | Fix: stay on Chats tab after creating a chat |
 |  3.6.6  | 2026-03-09 | Fix: Settings tab now persists across reloads like other tabs |

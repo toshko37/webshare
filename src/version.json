@@ -1,6 +1,6 @@
 {
-    "version": "3.6.8",
-    "released": "2026-03-09",
-    "changelog": "Fix: refresh chat list after creation while staying on Chats tab",
+    "version": "3.6.9",
+    "released": "2026-03-10",
+    "changelog": "Fix: tab no longer reverts to Settings after reload",
     "download_url": "https://webshare.techbg.net/"
 }
