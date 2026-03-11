@@ -2,6 +2,12 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.15] - 2026-03-11
+
+### Bug Fix
+
+- **Public pages no longer require login** – `folder-management.php` incorrectly required `security-check.php`, causing `/u` (upload) and any other public page that uses folder management to redirect to the login page
+
 ## [3.6.14] - 2026-03-10
 
 ### User Management
@@ -666,6 +672,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.15  | 2026-03-11 | Fix: /u and other public pages no longer require login |
 |  3.6.14  | 2026-03-10 | Fix: delete user folder and files when user is deleted |
 |  3.6.13  | 2026-03-10 | Fix: country and user-agent missing in audit purge/clear entries |
 |  3.6.12  | 2026-03-10 | Fix: admin folder visibility and orphaned folder cleanup |
