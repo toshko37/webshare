@@ -8,13 +8,18 @@
 $textsDir = __DIR__ . '/texts/';
 $metadataFile = __DIR__ . '/.texts.json';
 
-// Load config for speedtest link
+// Load config
 $config = [];
 $configFile = __DIR__ . '/.config.json';
 if (file_exists($configFile)) {
     $config = json_decode(file_get_contents($configFile), true) ?: [];
 }
 $speedtestUrl = $config['speedtest_url'] ?? '';
+
+// Require login if open_chat is disabled (default: open)
+if (!($config['open_chat'] ?? true)) {
+    require_once __DIR__ . '/security-check.php';
+}
 
 // CONFIGURATION
 define('TEXT_EXPIRE_HOURS', 24);

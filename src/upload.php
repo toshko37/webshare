@@ -7,6 +7,18 @@
 require_once __DIR__ . '/geo-check.php';
 checkGeoAccess();
 
+// Load config early (needed for access check)
+$config = [];
+$configFile = __DIR__ . '/.config.json';
+if (file_exists($configFile)) {
+    $config = json_decode(file_get_contents($configFile), true) ?: [];
+}
+
+// Require login if open_upload is disabled (default: open)
+if (!($config['open_upload'] ?? true)) {
+    require_once __DIR__ . '/security-check.php';
+}
+
 // Include user management for file ownership tracking
 require_once __DIR__ . '/user-management.php';
 
@@ -37,12 +49,6 @@ if (!is_dir($uploadDir)) {
     mkdir($uploadDir, 0755, true);
 }
 
-// Load config for speedtest link
-$config = [];
-$configFile = __DIR__ . '/.config.json';
-if (file_exists($configFile)) {
-    $config = json_decode(file_get_contents($configFile), true) ?: [];
-}
 $speedtestUrl = $config['speedtest_url'] ?? '';
 
 // Generate unique filename if file already exists (uses unique ID to prevent race conditions)

@@ -2,6 +2,17 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.16] - 2026-03-11
+
+### Settings
+
+- **Email Settings UI** – Fixed inconsistent input styling (number, password, email inputs now match text inputs); Port and Encryption are now a clean side-by-side pair; Password placeholder indicates when a password is saved; "Send Test" button is clearly labeled
+- **Public Access toggles** – New "Public Access" section in Settings lets admins control whether /t (chat) and /u (upload) are open to anonymous users or require login; defaults to open (existing behavior unchanged)
+
+### Bug Fix
+
+- **Open upload respects access setting** – `/u` and `/u/[username]` now check the Open Upload toggle; if disabled, anonymous visitors are redirected to login
+
 ## [3.6.15] - 2026-03-11
 
 ### Bug Fix
@@ -672,6 +683,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.16  | 2026-03-11 | Fix: Email Settings UI, add Public Access toggles |
 |  3.6.15  | 2026-03-11 | Fix: /u and other public pages no longer require login |
 |  3.6.14  | 2026-03-10 | Fix: delete user folder and files when user is deleted |
 |  3.6.13  | 2026-03-10 | Fix: country and user-agent missing in audit purge/clear entries |

@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.6.15');
+define('WEBSHARE_VERSION', '3.6.16');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
@@ -157,6 +157,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mail']) && $isAd
     file_put_contents($siteConfigFile, json_encode($siteConfig, JSON_PRETTY_PRINT));
     writeAuditLog('settings', "Mail settings updated: " . ($mailEnabled ? 'enabled' : 'disabled'));
     header('Location: ' . $_SERVER['REQUEST_URI']);
+    exit;
+}
+
+// Handle public access settings save (admin only)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_access']) && $isAdmin) {
+    $siteConfig['open_chat'] = isset($_POST['open_chat']);
+    $siteConfig['open_upload'] = isset($_POST['open_upload']);
+    file_put_contents($siteConfigFile, json_encode($siteConfig, JSON_PRETTY_PRINT));
+    writeAuditLog('settings', "Access settings updated: open_chat=" . ($siteConfig['open_chat'] ? 'yes' : 'no') . ", open_upload=" . ($siteConfig['open_upload'] ? 'yes' : 'no'));
+    header('Location: /?tab=settings&user_msg=Access settings saved');
     exit;
 }
 
@@ -1875,13 +1885,26 @@ function getRecentChanges($limit = 8) {
             font-weight: 500;
             color: #333;
         }
-        .setting-row input[type="text"] {
+        .setting-row input[type="text"],
+        .setting-row input[type="number"],
+        .setting-row input[type="password"],
+        .setting-row input[type="email"],
+        .setting-row input[type="url"],
+        .setting-row select {
             width: 100%;
             padding: 10px;
             border: 1px solid #ddd;
             border-radius: 4px;
             font-size: 14px;
             box-sizing: border-box;
+        }
+        .setting-row-split {
+            display: flex;
+            gap: 15px;
+        }
+        .setting-row-split > div {
+            flex: 1;
+            min-width: 0;
         }
         .setting-row small {
             display: block;
@@ -3384,6 +3407,45 @@ function getRecentChanges($limit = 8) {
                     </form>
                 </div>
 
+                <!-- Public Access Section -->
+                <?php $openChat = $siteConfig['open_chat'] ?? true; ?>
+                <?php $openUpload = $siteConfig['open_upload'] ?? true; ?>
+                <div class="setting-group" style="margin-top: 30px;">
+                    <h3>🔓 Public Access</h3>
+                    <p class="setting-desc">Control whether anonymous users (without login) can use chat and upload features.</p>
+
+                    <form method="POST">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+                        <input type="hidden" name="save_access" value="1">
+
+                        <div class="setting-row">
+                            <label class="toggle">
+                                <input type="checkbox" name="open_chat" id="open_chat" <?= $openChat ? 'checked' : '' ?> onchange="updateToggleStatus(this)">
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Open Chat (/t)</span>
+                                <span class="toggle-status <?= $openChat ? 'on' : 'off' ?>">
+                                    <?= $openChat ? 'OPEN' : 'LOGIN REQUIRED' ?>
+                                </span>
+                            </label>
+                            <small style="display: block; margin-top: 8px; color: #666;">Allow anyone to create and participate in chats without logging in.</small>
+                        </div>
+
+                        <div class="setting-row" style="margin-top: 15px;">
+                            <label class="toggle">
+                                <input type="checkbox" name="open_upload" id="open_upload" <?= $openUpload ? 'checked' : '' ?> onchange="updateToggleStatus(this)">
+                                <span class="toggle-slider"></span>
+                                <span class="toggle-label">Open Upload (/u)</span>
+                                <span class="toggle-status <?= $openUpload ? 'on' : 'off' ?>">
+                                    <?= $openUpload ? 'OPEN' : 'LOGIN REQUIRED' ?>
+                                </span>
+                            </label>
+                            <small style="display: block; margin-top: 8px; color: #666;">Allow anyone to upload files without logging in.</small>
+                        </div>
+
+                        <button type="submit" class="btn btn-save" style="margin-top: 15px;">💾 Save</button>
+                    </form>
+                </div>
+
                 <!-- Email Settings Section -->
                 <?php $mailConfig = $siteConfig['mail'] ?? ['enabled' => false]; ?>
                 <div class="setting-group" style="margin-top: 30px;">
@@ -3411,32 +3473,29 @@ function getRecentChanges($limit = 8) {
                                 <input type="text" name="smtp_host" value="<?= htmlspecialchars($mailConfig['smtp_host'] ?? '') ?>" placeholder="mail.example.com">
                             </div>
 
-                            <div class="setting-row" style="display: flex; gap: 15px;">
-                                <div style="flex: 1;">
-                                    <label>SMTP Port:</label>
+                            <div class="setting-row setting-row-split">
+                                <div>
+                                    <label>Port:</label>
                                     <input type="number" name="smtp_port" value="<?= htmlspecialchars($mailConfig['smtp_port'] ?? 465) ?>" placeholder="465">
                                 </div>
-                                <div style="flex: 1;">
+                                <div>
                                     <label>Encryption:</label>
-                                    <select name="smtp_encryption" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
-                                        <option value="ssl" <?= ($mailConfig['smtp_encryption'] ?? 'ssl') === 'ssl' ? 'selected' : '' ?>>SSL (port 465)</option>
-                                        <option value="tls" <?= ($mailConfig['smtp_encryption'] ?? '') === 'tls' ? 'selected' : '' ?>>TLS (port 587)</option>
-                                        <option value="none" <?= ($mailConfig['smtp_encryption'] ?? '') === 'none' ? 'selected' : '' ?>>None (port 25)</option>
+                                    <select name="smtp_encryption">
+                                        <option value="ssl" <?= ($mailConfig['smtp_encryption'] ?? 'ssl') === 'ssl' ? 'selected' : '' ?>>SSL (465)</option>
+                                        <option value="tls" <?= ($mailConfig['smtp_encryption'] ?? '') === 'tls' ? 'selected' : '' ?>>TLS (587)</option>
+                                        <option value="none" <?= ($mailConfig['smtp_encryption'] ?? '') === 'none' ? 'selected' : '' ?>>None (25)</option>
                                     </select>
                                 </div>
                             </div>
 
                             <div class="setting-row">
-                                <label>SMTP Username (email):</label>
+                                <label>SMTP Username:</label>
                                 <input type="text" name="smtp_user" value="<?= htmlspecialchars($mailConfig['smtp_user'] ?? '') ?>" placeholder="noreply@example.com">
                             </div>
 
                             <div class="setting-row">
                                 <label>SMTP Password:</label>
-                                <input type="password" name="smtp_pass" value="" placeholder="<?= !empty($mailConfig['smtp_pass']) ? '••••••• (saved)' : 'Enter password' ?>">
-                                <?php if (!empty($mailConfig['smtp_pass'])): ?>
-                                <small style="color: #666;">Leave empty to keep current password</small>
-                                <?php endif; ?>
+                                <input type="password" name="smtp_pass" value="" placeholder="<?= !empty($mailConfig['smtp_pass']) ? '(saved — leave empty to keep)' : 'Enter password' ?>">
                             </div>
 
                             <div class="setting-row">
@@ -3447,8 +3506,8 @@ function getRecentChanges($limit = 8) {
                             <div class="setting-row">
                                 <label>Test Email:</label>
                                 <div style="display: flex; gap: 10px;">
-                                    <input type="email" id="testEmailAddr" placeholder="test@example.com" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
-                                    <button type="button" class="btn" style="background: #2196F3;" onclick="testMailSettings()">📧 Test</button>
+                                    <input type="email" id="testEmailAddr" placeholder="test@example.com" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
+                                    <button type="button" class="btn" style="background: #2196F3; white-space: nowrap;" onclick="testMailSettings()">📧 Send Test</button>
                                 </div>
                                 <div id="testMailResult" style="margin-top: 10px; display: none; padding: 10px; border-radius: 6px;"></div>
                             </div>
@@ -5134,6 +5193,19 @@ systemctl reload apache2</code>
         });
 
         // Mail settings functions
+        function updateToggleStatus(checkbox) {
+            const statusEl = checkbox.closest('.toggle').querySelector('.toggle-status');
+            if (!statusEl) return;
+            const isChat = checkbox.id === 'open_chat';
+            const isUpload = checkbox.id === 'open_upload';
+            if (isChat || isUpload) {
+                statusEl.textContent = checkbox.checked ? 'OPEN' : 'LOGIN REQUIRED';
+            } else {
+                statusEl.textContent = checkbox.checked ? 'ENABLED' : 'DISABLED';
+            }
+            statusEl.className = 'toggle-status ' + (checkbox.checked ? 'on' : 'off');
+        }
+
         function toggleMailSettings() {
             const enabled = document.getElementById('mail_enabled').checked;
             const fields = document.getElementById('mailSettingsFields');

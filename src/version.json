@@ -1,6 +1,6 @@
 {
-    "version": "3.6.15",
+    "version": "3.6.16",
     "released": "2026-03-11",
-    "changelog": "Fix: /u and other public pages no longer require login",
+    "changelog": "Fix: Email Settings UI, add Public Access toggles",
     "download_url": "https://webshare.techbg.net/"
 }
