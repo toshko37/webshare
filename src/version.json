@@ -1,6 +1,6 @@
 {
-    "version": "3.6.16",
-    "released": "2026-03-11",
-    "changelog": "Fix: Email Settings UI, add Public Access toggles",
+    "version": "3.6.17",
+    "released": "2026-03-12",
+    "changelog": "Fix: fail2ban false-positive ban from AH01630 htaccess errors",
     "download_url": "https://webshare.techbg.net/"
 }

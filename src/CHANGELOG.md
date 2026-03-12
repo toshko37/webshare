@@ -2,6 +2,12 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.17] - 2026-03-12
+
+### Bug Fix
+
+- **fail2ban false-positive ban** – Apache's `DirectoryIndex` was trying `index.html` before `index.php`; since `.htaccess` blocks all `.html` files, every page load logged an `AH01630` error. After 5+ requests fail2ban counted these as auth failures and banned the user. Fixed by adding `DirectoryIndex index.php` to `.htaccess` (and `htaccess.txt`) so Apache skips straight to `index.php` without checking `index.html`.
+
 ## [3.6.16] - 2026-03-11
 
 ### Settings
@@ -683,6 +689,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.17  | 2026-03-12 | Fix: fail2ban false-positive ban from AH01630 htaccess errors |
 |  3.6.16  | 2026-03-11 | Fix: Email Settings UI, add Public Access toggles |
 |  3.6.15  | 2026-03-11 | Fix: /u and other public pages no longer require login |
 |  3.6.14  | 2026-03-10 | Fix: delete user folder and files when user is deleted |
