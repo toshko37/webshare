@@ -1,6 +1,10 @@
 # Webshare Access Control
 # =======================
 
+# Prevent Apache from trying index.html (blocked by FilesMatch below) before index.php
+# This avoids AH01630 errors in the error log that trigger fail2ban apache-auth
+DirectoryIndex index.php
+
 # Force UTF-8 encoding for all text files
 AddDefaultCharset UTF-8
 AddCharset UTF-8 .md .txt .json
