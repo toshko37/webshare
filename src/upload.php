@@ -29,7 +29,9 @@ require_once __DIR__ . '/audit-log.php';
 require_once __DIR__ . '/encryption.php';
 
 // Determine target folder (user or public)
-$targetUser = $_GET['user'] ?? null;
+// Accept the target user from the URL (/u/USERNAME -> ?user=) or from the
+// POST form field "target_user"/"user" (documented curl usage).
+$targetUser = $_GET['user'] ?? $_POST['target_user'] ?? $_POST['user'] ?? null;
 $targetFolder = '_public'; // Default to public folder
 
 if ($targetUser !== null) {
@@ -79,6 +81,16 @@ if (isset($_POST['delete_partial'])) {
 // Check if this is an AJAX request
 $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) &&
           strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+
+// Check if this is a command-line / non-browser client (curl, wget, etc.).
+// Such clients should get a plain-text response instead of the full HTML page,
+// otherwise the upload "looks like cat" — a wall of HTML with no confirmation.
+$ua = strtolower($_SERVER['HTTP_USER_AGENT'] ?? '');
+$accept = $_SERVER['HTTP_ACCEPT'] ?? '';
+$isCli = !$isAjax && (
+    preg_match('/curl|wget|httpie|python-requests|libwww|go-http|okhttp|powershell|invoke-/i', $ua)
+    || strpos($accept, 'text/html') === false
+);
 
 // Handle file upload
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'])) {
@@ -139,6 +151,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'])) {
                 exit;
             }
 
+            if ($isCli) {
+                // Plain-text confirmation for curl/wget and other CLI clients
+                header('Content-Type: text/plain; charset=utf-8');
+                $note = $finalFilename !== $originalFilename ? ' (renamed, original name was taken)' : '';
+                if ($wasEncrypted) {
+                    $note .= ' (encrypted)';
+                }
+                echo "OK: uploaded as $finalFilename$note\n";
+                exit;
+            }
+
             if ($finalFilename !== $originalFilename) {
                 $success = "File uploaded as: $finalFilename (original name was taken)";
             } else {
@@ -151,6 +174,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'])) {
             if ($isAjax) {
                 header('Content-Type: application/json');
                 echo json_encode(['success' => false, 'error' => 'Failed to upload file']);
+                exit;
+            }
+            if ($isCli) {
+                header('Content-Type: text/plain; charset=utf-8');
+                http_response_code(500);
+                echo "ERROR: Failed to upload file\n";
                 exit;
             }
             $error = "Failed to upload file.";
@@ -170,6 +199,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'])) {
         if ($isAjax) {
             header('Content-Type: application/json');
             echo json_encode(['success' => false, 'error' => $errorMsg]);
+            exit;
+        }
+        if ($isCli) {
+            header('Content-Type: text/plain; charset=utf-8');
+            http_response_code(400);
+            echo "ERROR: $errorMsg\n";
             exit;
         }
         $error = $errorMsg;
