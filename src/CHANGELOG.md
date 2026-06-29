@@ -2,6 +2,16 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.18] - 2026-06-29
+
+### Bug Fixes
+- **Fix: Delete (and rename/move/encrypt) in Public folder & subfolders** - File operations failed with "File not found" in any non-default folder because the folder parameter was being stripped from the URL on page load. The `?folder=...` parameter is now preserved.
+- **Fix: Delete button silent failures** - The delete action now shows clear error messages (expired session, network errors) instead of failing silently, and asks for confirmation before deleting.
+
+### Upload (curl / CLI) Fixes
+- **Fix: `/u` curl uploads now return a plain-text confirmation** - Uploading via `curl -F "file=@file.sh" .../u` returned the full HTML page (looked like `cat`). CLI clients (curl, wget, etc.) now get a clean `OK: uploaded as <name>` response.
+- **Fix: `target_user` parameter now works for `/u` uploads** - The documented `-F "target_user=USERNAME"` form field was ignored, sending all uploads to the Public folder. It now correctly routes to the target user's folder.
+
 ## [3.6.17] - 2026-03-12
 
 ### Bug Fix
@@ -689,6 +699,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.18  | 2026-06-29 | Fix delete in Public folder & curl upload responses |
 |  3.6.17  | 2026-03-12 | Fix: fail2ban false-positive ban from AH01630 htaccess errors |
 |  3.6.16  | 2026-03-11 | Fix: Email Settings UI, add Public Access toggles |
 |  3.6.15  | 2026-03-11 | Fix: /u and other public pages no longer require login |

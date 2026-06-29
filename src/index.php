@@ -2,7 +2,7 @@
 // Webshare - Simple File Sharing Interface
 // =========================================
 
-define('WEBSHARE_VERSION', '3.6.17');
+define('WEBSHARE_VERSION', '3.6.18');
 
 // Critical security check - .htaccess must exist
 require_once __DIR__ . '/security-check.php';
@@ -5293,6 +5293,7 @@ systemctl reload apache2</code>
         }
 
         async function deleteFile(filename) {
+            if (!confirm('Delete "' + filename + '"?\nThis cannot be undone.')) return;
             try {
                 const formData = new FormData();
                 formData.append('csrf_token', csrfToken);
@@ -5303,13 +5304,27 @@ systemctl reload apache2</code>
                     body: formData
                 });
 
-                const result = await response.json();
+                if (!response.ok) {
+                    alert('Delete failed (HTTP ' + response.status + ').\nYour session may have expired — please refresh the page and log in again.');
+                    return;
+                }
+
+                let result;
+                try {
+                    result = await response.json();
+                } catch (e) {
+                    // Response was not JSON (e.g. login page after session expiry)
+                    alert('Delete failed: unexpected server response.\nYour session may have expired — please refresh the page and log in again.');
+                    return;
+                }
 
                 if (result.success) {
                     window.location.reload();
+                } else {
+                    alert('Could not delete file: ' + (result.error || 'unknown error'));
                 }
             } catch (error) {
-                // Silently fail
+                alert('Could not delete file: ' + (error && error.message ? error.message : 'network error'));
             }
         }
 
@@ -5376,8 +5391,12 @@ systemctl reload apache2</code>
             localStorage.setItem('activeTab', tabName);
 
             // Clean up URL params so reload() won't re-apply ?tab=... or ?user_msg=...
+            // IMPORTANT: preserve ?folder=... — file operations (delete/upload/rename)
+            // POST to window.location.href and rely on it to know the current folder.
             if (window.location.search || window.location.hash) {
-                history.replaceState({}, '', '/');
+                const cleanupParams = new URLSearchParams(window.location.search);
+                const keepFolder = cleanupParams.get('folder');
+                history.replaceState({}, '', keepFolder ? '/?folder=' + encodeURIComponent(keepFolder) : '/');
             }
 
             // Load audit log when audit tab is opened
