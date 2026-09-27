@@ -1210,6 +1210,27 @@ function getRecentChanges($limit = 8) {
             align-items: center;
             gap: 15px;
         }
+        .disk-usage {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            font-size: 12px;
+            color: #666;
+            min-width: 130px;
+        }
+        .disk-usage-bar {
+            height: 5px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .disk-usage-fill {
+            height: 100%;
+            background: #4CAF50;
+        }
+        .disk-usage.warn .disk-usage-fill { background: #ff9800; }
+        .disk-usage.critical .disk-usage-fill { background: #f44336; }
+        .disk-usage.critical { color: #d32f2f; font-weight: 600; }
         .current-user {
             color: #666;
             font-size: 14px;
@@ -2518,6 +2539,18 @@ function getRecentChanges($limit = 8) {
         <a href="<?= htmlspecialchars($siteConfig['speedtest_url']) ?>" target="_blank" class="speed-link">🚀 Speed Test</a>
         <?php endif; ?>
         <div class="user-header">
+            <?php
+            $diskFree = @disk_free_space($uploadDir);
+            $diskTotal = @disk_total_space($uploadDir);
+            if ($diskFree !== false && $diskTotal):
+                $diskUsedPct = round(($diskTotal - $diskFree) / $diskTotal * 100);
+                $diskClass = $diskUsedPct >= 95 ? 'critical' : ($diskUsedPct >= 85 ? 'warn' : '');
+            ?>
+            <div class="disk-usage <?= $diskClass ?>" title="Disk: <?= formatBytes($diskTotal - $diskFree) ?> used of <?= formatBytes($diskTotal) ?> (<?= $diskUsedPct ?>%)">
+                <span>💾 <?= formatBytes($diskFree) ?> free of <?= formatBytes($diskTotal) ?></span>
+                <div class="disk-usage-bar"><div class="disk-usage-fill" style="width: <?= $diskUsedPct ?>%"></div></div>
+            </div>
+            <?php endif; ?>
             <span class="current-user">👤 <?= htmlspecialchars($currentUser) ?></span>
             <a href="/logout.php" class="logout-link">🚪 Logout</a>
         </div>
