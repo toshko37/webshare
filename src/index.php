@@ -1293,6 +1293,34 @@ function getRecentChanges($limit = 8) {
         .btn-danger:hover {
             background: #da190b;
         }
+        .file-select-col {
+            width: 32px;
+            text-align: center;
+        }
+        .file-select-col input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            vertical-align: middle;
+        }
+        tr.file-selected td {
+            background: #fff3e0;
+        }
+        .bulk-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #555;
+        }
+        .bulk-actions .btn-danger {
+            margin-left: 0;
+        }
+        .bulk-actions .btn-danger:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
         .btn-share {
             background: #2196F3;
             padding: 6px 12px;
@@ -2739,9 +2767,15 @@ function getRecentChanges($limit = 8) {
                     <p>No files uploaded yet.</p>
                 </div>
             <?php else: ?>
+                <div class="bulk-actions">
+                    <button type="button" class="btn btn-danger" id="bulkDeleteBtn" onclick="deleteSelectedFiles()" disabled>
+                        Delete selected (<span id="selectedCount">0</span>)
+                    </button>
+                </div>
                 <table>
                     <thead>
                         <tr>
+                            <th class="file-select-col"><input type="checkbox" id="selectAllFiles" onchange="toggleSelectAllFiles(this)" title="Select all"></th>
                             <th>Filename</th>
                             <th>Owner</th>
                             <th>Size</th>
@@ -2754,6 +2788,9 @@ function getRecentChanges($limit = 8) {
                             $isEncrypted = isEncryptedFile($file['name']);
                         ?>
                             <tr class="<?= $isEncrypted ? 'file-encrypted' : '' ?>">
+                                <td class="file-select-col">
+                                    <input type="checkbox" class="file-select" value="<?= htmlspecialchars($file['name'], ENT_QUOTES) ?>" onchange="updateFileSelection()">
+                                </td>
                                 <td>
                                     <a href="download.php?file=<?= urlencode($file['name']) ?>&folder=<?= urlencode($currentFolder) ?>" class="file-name">
                                         <?php if ($isEncrypted): ?>🔒 <?php endif; ?>
@@ -5292,8 +5329,8 @@ systemctl reload apache2</code>
             }
         }
 
-        async function deleteFile(filename) {
-            if (!confirm('Delete "' + filename + '"?\nThis cannot be undone.')) return;
+        // Sends a single delete request; returns null on success or an error message
+        async function requestFileDelete(filename) {
             try {
                 const formData = new FormData();
                 formData.append('csrf_token', csrfToken);
@@ -5305,8 +5342,7 @@ systemctl reload apache2</code>
                 });
 
                 if (!response.ok) {
-                    alert('Delete failed (HTTP ' + response.status + ').\nYour session may have expired — please refresh the page and log in again.');
-                    return;
+                    return 'HTTP ' + response.status + ' — your session may have expired, please refresh the page and log in again.';
                 }
 
                 let result;
@@ -5314,18 +5350,64 @@ systemctl reload apache2</code>
                     result = await response.json();
                 } catch (e) {
                     // Response was not JSON (e.g. login page after session expiry)
-                    alert('Delete failed: unexpected server response.\nYour session may have expired — please refresh the page and log in again.');
-                    return;
+                    return 'unexpected server response — your session may have expired, please refresh the page and log in again.';
                 }
 
-                if (result.success) {
-                    window.location.reload();
-                } else {
-                    alert('Could not delete file: ' + (result.error || 'unknown error'));
-                }
+                return result.success ? null : (result.error || 'unknown error');
             } catch (error) {
-                alert('Could not delete file: ' + (error && error.message ? error.message : 'network error'));
+                return (error && error.message) ? error.message : 'network error';
             }
+        }
+
+        async function deleteFile(filename) {
+            const err = await requestFileDelete(filename);
+            if (err) {
+                alert('Could not delete "' + filename + '": ' + err);
+                return;
+            }
+            window.location.reload();
+        }
+
+        function getSelectedFiles() {
+            return Array.from(document.querySelectorAll('input.file-select:checked')).map(cb => cb.value);
+        }
+
+        function updateFileSelection() {
+            const all = document.querySelectorAll('input.file-select');
+            const selected = getSelectedFiles();
+            all.forEach(cb => cb.closest('tr').classList.toggle('file-selected', cb.checked));
+            const countEl = document.getElementById('selectedCount');
+            const btn = document.getElementById('bulkDeleteBtn');
+            const selectAll = document.getElementById('selectAllFiles');
+            if (countEl) countEl.textContent = selected.length;
+            if (btn) btn.disabled = selected.length === 0;
+            if (selectAll) {
+                selectAll.checked = all.length > 0 && selected.length === all.length;
+                selectAll.indeterminate = selected.length > 0 && selected.length < all.length;
+            }
+        }
+
+        function toggleSelectAllFiles(master) {
+            document.querySelectorAll('input.file-select').forEach(cb => cb.checked = master.checked);
+            updateFileSelection();
+        }
+
+        async function deleteSelectedFiles() {
+            const files = getSelectedFiles();
+            if (files.length === 0) return;
+            const btn = document.getElementById('bulkDeleteBtn');
+            if (btn) btn.disabled = true;
+
+            const errors = [];
+            for (const name of files) {
+                const err = await requestFileDelete(name);
+                if (err) errors.push(name + ': ' + err);
+            }
+
+            if (errors.length) {
+                alert('Some files could not be deleted:\n\n' + errors.join('\n'));
+            }
+            window.location.reload();
         }
 
         // ========================================
