@@ -2,6 +2,16 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.19] - 2026-09-27
+
+### File Management
+- **File selection checkboxes** - Checkbox before every file in all folders (Public, own folder, subfolders)
+  - "Select all" checkbox in the table header (with indeterminate state)
+  - Selected rows are highlighted
+- **Bulk delete** - New "Delete selected (N)" button above the file list
+  - Failed deletions are reported in a single summary message
+- **No delete confirmation** - Delete button now removes the file immediately without a confirm prompt
+
 ## [3.6.18] - 2026-06-29
 
 ### Bug Fixes
@@ -699,6 +709,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.19  | 2026-09-27 | File selection checkboxes & bulk delete |
 |  3.6.18  | 2026-06-29 | Fix delete in Public folder & curl upload responses |
 |  3.6.17  | 2026-03-12 | Fix: fail2ban false-positive ban from AH01630 htaccess errors |
 |  3.6.16  | 2026-03-11 | Fix: Email Settings UI, add Public Access toggles |

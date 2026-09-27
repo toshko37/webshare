@@ -1,6 +1,6 @@
 {
-    "version": "3.6.18",
-    "released": "2026-06-29",
-    "changelog": "Fix delete in Public folder & curl upload responses",
+    "version": "3.6.19",
+    "released": "2026-09-27",
+    "changelog": "File selection checkboxes & bulk delete",
     "download_url": "https://webshare.techbg.net/"
 }
