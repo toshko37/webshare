@@ -1,6 +1,6 @@
 {
-    "version": "3.6.19",
+    "version": "3.6.20",
     "released": "2026-09-27",
-    "changelog": "File selection checkboxes & bulk delete",
+    "changelog": "Free disk space indicator in header",
     "download_url": "https://webshare.techbg.net/"
 }

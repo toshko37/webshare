@@ -2,6 +2,13 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.6.20] - 2026-09-27
+
+### UI
+- **Free disk space indicator** - Header now shows free/total disk space next to the username
+  - Progress bar colored green (<85%), orange (85–95%), red (≥95% used)
+  - Tooltip with used space, total size and percentage
+
 ## [3.6.19] - 2026-09-27
 
 ### File Management
@@ -709,6 +716,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.6.20  | 2026-09-27 | Free disk space indicator in header |
 |  3.6.19  | 2026-09-27 | File selection checkboxes & bulk delete |
 |  3.6.18  | 2026-06-29 | Fix delete in Public folder & curl upload responses |
 |  3.6.17  | 2026-03-12 | Fix: fail2ban false-positive ban from AH01630 htaccess errors |
