@@ -75,6 +75,7 @@ src/.tokens.json
 src/.texts.json
 src/.files-meta.json
 src/.audit.json
+src/.audit.*.json
 src/.api-keys.json
 src/.folder-shares.json
 src/.encryption-keys.json

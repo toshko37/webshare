@@ -111,8 +111,14 @@ class SmtpMailer {
             $headers = $this->buildHeaders($to, $subject, $fromName, $replyTo, $boundary);
             $body = $this->buildBody($htmlBody, $boundary);
 
-            // Send email content
-            $emailData = $headers . "\r\n" . $body . "\r\n.";
+            // Assemble: header block, blank line, then MIME body (RFC 5322)
+            $message = $headers . "\r\n\r\n" . $body;
+
+            // SMTP dot-stuffing: any line starting with '.' must be doubled (RFC 5321 4.5.2)
+            $message = str_replace("\r\n.", "\r\n..", $message);
+
+            // Send email content, terminated by <CRLF>.<CRLF>
+            $emailData = $message . "\r\n.";
             if (!$this->sendCommand($emailData, 250)) {
                 $this->lastError = 'Sending email content failed';
                 return false;
@@ -191,15 +197,38 @@ class SmtpMailer {
         return trim($response);
     }
 
+    /**
+     * RFC 2047 encode a header value only when it actually contains non-ASCII
+     * bytes. Pure-ASCII subjects are sent verbatim so filters don't flag
+     * needless base64 (rspamd SUBJ_EXCESS_BASE64 / Gmail heuristics).
+     */
+    private function encodeSubject($subject) {
+        // Guard against header injection via CR/LF in the subject
+        $subject = str_replace(["\r", "\n"], '', $subject);
+
+        if (!preg_match('/[^\x20-\x7E]/', $subject)) {
+            return $subject; // plain ASCII, no encoding needed
+        }
+        if (function_exists('mb_encode_mimeheader')) {
+            $prev = mb_internal_encoding();
+            mb_internal_encoding('UTF-8');
+            $encoded = mb_encode_mimeheader($subject, 'UTF-8', 'B', "\r\n");
+            mb_internal_encoding($prev);
+            return $encoded;
+        }
+        // Fallback: single encoded-word (fine for short subjects)
+        return "=?UTF-8?B?" . base64_encode($subject) . "?=";
+    }
+
     private function buildHeaders($to, $subject, $fromName, $replyTo, $boundary) {
         $headers = [];
         $headers[] = "Date: " . date('r');
         $headers[] = "From: {$fromName} <{$this->username}>";
         $headers[] = "To: {$to}";
-        $headers[] = "Subject: =?UTF-8?B?" . base64_encode($subject) . "?=";
+        $headers[] = "Subject: " . $this->encodeSubject($subject);
         $headers[] = "MIME-Version: 1.0";
         $headers[] = "Content-Type: multipart/alternative; boundary=\"{$boundary}\"";
-        $headers[] = "X-Mailer: WebShare Mailer";
+        $headers[] = "X-Mailer: WebShare Mailer 2.0";
 
         if ($replyTo) {
             $headers[] = "Reply-To: {$replyTo}";
@@ -218,15 +247,15 @@ class SmtpMailer {
         $body = [];
         $body[] = "--{$boundary}";
         $body[] = "Content-Type: text/plain; charset=UTF-8";
-        $body[] = "Content-Transfer-Encoding: base64";
+        $body[] = "Content-Transfer-Encoding: quoted-printable";
         $body[] = "";
-        $body[] = chunk_split(base64_encode($plainText));
+        $body[] = quoted_printable_encode($plainText);
 
         $body[] = "--{$boundary}";
         $body[] = "Content-Type: text/html; charset=UTF-8";
-        $body[] = "Content-Transfer-Encoding: base64";
+        $body[] = "Content-Transfer-Encoding: quoted-printable";
         $body[] = "";
-        $body[] = chunk_split(base64_encode($htmlBody));
+        $body[] = quoted_printable_encode($htmlBody);
 
         $body[] = "--{$boundary}--";
 

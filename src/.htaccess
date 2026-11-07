@@ -91,8 +91,11 @@ Options -Indexes
 </FilesMatch>
 
 # PHP Configuration for large uploads
-php_value upload_max_filesize 10G
-php_value post_max_size 10G
-php_value max_execution_time 7200
-php_value max_input_time 7200
-php_value memory_limit 512M
+# php_value moved to .user.ini (php-fpm, 2026-11-07); kept only for mod_php
+<IfModule mod_php8.c>
+    php_value upload_max_filesize 10G
+    php_value post_max_size 10G
+    php_value max_execution_time 7200
+    php_value max_input_time 7200
+    php_value memory_limit 512M
+</IfModule>
