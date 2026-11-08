@@ -18,14 +18,11 @@ $unlisted = array_diff($php, $manifest);
 t('every src/*.php is in the manifest', !$unlisted, implode(', ', $unlisted));
 
 $lu = file_get_contents("$src/live-update.php");
-preg_match('/\$phpFiles = \[(.*?)\];/s', $lu, $m1);
-preg_match('/\$otherFiles = \[(.*?)\];/s', $lu, $m2);
-preg_match_all("/'([^']+)'/", $m1[1] . $m2[1], $m);
-$liveList = $m[1];
-$notInLive = array_diff(array_filter($manifest, fn($f) => strpos($f, '/') === false), $liveList);
-t('live-update.php downloads every top-level manifest file', !$notInLive, implode(', ', $notInLive));
-$notInManifest = array_diff($liveList, $manifest);
-t('live-update.php lists nothing outside the manifest', !$notInManifest, implode(', ', $notInManifest));
+t('live-update.php installs only signed releases (F5)', strpos($lu, 'ws_release_verify_manifest(') !== false && strpos($lu, "hash_equals(\$hash, hash('sha256', \$content))") !== false);
+t('live-update.php has no hard-coded file list any more', strpos($lu, '$phpFiles') === false);
+$sign = file_get_contents(__DIR__ . '/../tools/sign-release.php');
+t('sign-release.php signs every manifest entry', strpos($sign, '$src/manifest.txt') !== false);
+t('release.sh signs before committing', (bool)preg_match('/sign-release\.php.*\n(.*\n)*.*git add .*release-manifest/', file_get_contents(__DIR__ . '/../release.sh')));
 
 foreach (['get-webshare.sh', 'install.sh', 'update.sh', 'update-remote.sh'] as $inst) {
     $s = file_get_contents(__DIR__ . "/../installer/$inst");

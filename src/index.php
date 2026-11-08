@@ -112,6 +112,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_FILES['file']) && !validat
     die('CSRF validation failed. Please refresh the page and try again.');
 }
 
+// F2: trash. Expired items are removed lazily (at most once an hour).
+require_once __DIR__ . '/trash.php';
+trash_purge();
+
+// F1: storage quotas (admin)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_quotas']) && $isAdmin) {
+    require_once __DIR__ . '/quota.php';
+    $siteConfig['default_quota_mb'] = max(0, (int)($_POST['default_quota_mb'] ?? 0));
+    file_put_contents($siteConfigFile, json_encode($siteConfig, JSON_PRETTY_PRINT), LOCK_EX);
+    $changes = [];
+    foreach ((array)($_POST['quota'] ?? []) as $qUser => $qVal) {
+        if (!userExists($qUser)) continue;
+        $qVal = trim((string)$qVal);
+        quota_set($qUser, $qVal === '' ? null : (int)$qVal);
+        $changes[] = "$qUser=" . ($qVal === '' ? 'default' : (int)$qVal . 'MB');
+    }
+    writeAuditLog('settings', 'Quotas: default ' . $siteConfig['default_quota_mb'] . ' MB; ' . implode(', ', $changes));
+    header('Location: /?tab=settings&user_msg=' . urlencode('Quotas saved'));
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_trash']) && $isAdmin) {
+    $siteConfig['trash_days'] = max(0, min(365, (int)($_POST['trash_days'] ?? 30)));
+    file_put_contents($siteConfigFile, json_encode($siteConfig, JSON_PRETTY_PRINT), LOCK_EX);
+    writeAuditLog('settings', 'Trash retention: ' . ($siteConfig['trash_days'] ? $siteConfig['trash_days'] . ' days' : 'off (immediate delete)'));
+    header('Location: /?tab=settings&user_msg=' . urlencode('Trash settings saved'));
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trash_action'])) {
+    header('Content-Type: application/json');
+    $ta = $_POST['trash_action'];
+    $tid = preg_replace('/[^a-f0-9]/', '', $_POST['id'] ?? '');
+    if ($ta === 'list') {
+        $items = trash_list($currentUser);
+        foreach ($items as &$it) {
+            $it['size_h'] = formatBytes($it['size'] ?? 0);
+            $it['folder_h'] = ($it['folder'] ?? '') === '_public' ? 'Public' : ($it['folder'] ?? '');
+        }
+        unset($it);
+        echo json_encode(['success' => true, 'items' => $items, 'days' => trash_days(), 'admin' => $isAdmin]);
+    } elseif ($ta === 'restore') {
+        $r = trash_restore($tid, $currentUser);
+        if ($r['success']) writeAuditLog('trash_restore', "Restored from trash: {$r['name']} to folder: " . ($r['folder'] ?? ''));
+        echo json_encode($r);
+    } elseif ($ta === 'delete') {
+        $r = trash_delete($tid, $currentUser);
+        if ($r['success']) writeAuditLog('trash_delete', "Deleted permanently from trash: {$r['item']['name']} (folder: {$r['item']['folder']})");
+        unset($r['item']);
+        echo json_encode($r);
+    } elseif ($ta === 'empty') {
+        $n = trash_empty($currentUser);
+        writeAuditLog('trash_empty', "Emptied trash: $n item(s)");
+        echo json_encode(['success' => true, 'deleted' => $n]);
+    } else {
+        echo json_encode(['success' => false, 'error' => 'Invalid action']);
+    }
+    exit;
+}
+
 // Handle speedtest URL save (admin only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_speedtest']) && $isAdmin) {
     $siteConfig['speedtest_url'] = trim($_POST['speedtest_url'] ?? '');
@@ -173,6 +233,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mail']) && $isAd
 // Handle public access settings save (admin only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_access']) && $isAdmin) {
     $siteConfig['open_chat'] = isset($_POST['open_chat']);
+    $siteConfig['link_previews'] = isset($_POST['link_previews']);   // F7
+    // F8: anonymous chat protection
+    require_once __DIR__ . '/chat-guard.php';
+    $siteConfig['chat_guard'] = cg_sanitize([
+        'enabled' => isset($_POST['chat_guard_enabled']),
+        'per_ip_hour' => $_POST['chat_per_ip_hour'] ?? 10,
+        'max_active' => $_POST['chat_max_active'] ?? 300,
+    ]);
 
     // Upload mode: verified | open | login (open_upload kept in sync for older code)
     $guardSaved = ug_sanitize_config(['mode' => $_POST['upload_mode'] ?? 'verified'], ug_config($siteConfig));
@@ -185,7 +253,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_access']) && $is
         exit;
     }
     ug_sync_flags(ug_config($siteConfig));
-    writeAuditLog('settings', "Access settings updated: open_chat=" . ($siteConfig['open_chat'] ? 'yes' : 'no') . ", upload_mode=" . $guardSaved['mode']);
+    writeAuditLog('settings', "Access settings updated: open_chat=" . ($siteConfig['open_chat'] ? 'yes' : 'no') . ", upload_mode=" . $guardSaved['mode'] . ', chat_guard=' . json_encode($siteConfig['chat_guard']));
     header('Location: /?tab=settings&user_msg=Access settings saved');
     exit;
 }
@@ -640,6 +708,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'])) {
             }
         }
 
+        // F1: storage quota of the folder's owner
+        if (!isset($error)) {
+            require_once __DIR__ . '/quota.php';
+            if ($qe = quota_check($currentFolder, (int)$file['size'])) {
+                $error = $qe;
+                $errorStatus = 413;
+            }
+        }
+
         if (!isset($error)) {
             $filename = getUniqueFilename($uploadDir, $originalFilename);
             $targetPath = $uploadDir . $filename;
@@ -705,6 +782,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'])) {
     }
 }
 
+// Upload errors for the XHR uploader as JSON with a 4xx status (it shows the message)
+if (isset($_FILES['file']) && isset($error) && ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest') {
+    http_response_code($errorStatus ?? 400);
+    header('Content-Type: application/json');
+    echo json_encode(['success' => false, 'error' => $error]);
+    exit;
+}
+
 // Handle file renaming (AJAX)
 if (isset($_POST['rename']) && isset($_POST['old_name']) && isset($_POST['new_name'])) {
     $oldName = basename($_POST['old_name']);
@@ -759,30 +844,15 @@ if (isset($_POST['delete'])) {
     header('Content-Type: application/json');
 
     if (file_exists($filePath) && is_file($filePath)) {
-        if (unlink($filePath)) {
-            // Also remove from share tokens
-            $tokensFile = __DIR__ . '/.tokens.json';
-            if (file_exists($tokensFile)) {
-                ws_json_mutex($tokensFile);   // I4: hold the lock until this request ends
-                $tokens = json_decode(file_get_contents($tokensFile), true) ?? [];
-                $tokens = array_filter($tokens, function($data) use ($filename, $currentFolder) {
-                    // Handle both old format (string) and new format (array)
-                    if (is_array($data)) {
-                        return $data['filename'] !== $filename;
-                    }
-                    return $data !== $filename;
-                });
-                file_put_contents($tokensFile, json_encode($tokens, JSON_PRETTY_PRINT), LOCK_EX);
-            }
-            // Remove file ownership metadata (try both old and new key formats)
-            removeFileMeta($filename);
-            removeFileMeta($currentFolder . '/' . $filename);
-            // Audit log
+        // F2: to the trash (with its share links and metadata), unless the trash is off
+        require_once __DIR__ . '/trash.php';
+        $res = trash_move_file($currentFolder, $filename, $currentUser);
+        if ($res['success']) {
             $folderDisplay = $currentFolder === '_public' ? 'Public' : $currentFolder;
-            writeAuditLog('delete', "Deleted file: $filename from folder: $folderDisplay");
-            echo json_encode(['success' => true]);
+            writeAuditLog('delete', ($res['id'] ? 'Moved to trash' : 'Deleted') . ": $filename from folder: $folderDisplay");
+            echo json_encode(['success' => true, 'trash' => (bool)$res['id']]);
         } else {
-            echo json_encode(['success' => false, 'error' => 'Failed to delete file']);
+            echo json_encode(['success' => false, 'error' => $res['error']]);
         }
     } else {
         echo json_encode(['success' => false, 'error' => 'File not found']);
@@ -2288,6 +2358,32 @@ function getRecentChanges($limit = 8) {
         .btn-email:hover {
             background: #1565C0;
         }
+        .trash-bar { display: flex; justify-content: flex-end; align-items: center; gap: 16px; margin: 10px 0; flex-wrap: wrap; }
+        .quota-summary { flex: 1 1 240px; font-size: 13px; color: #37474f; }
+        .quota-bar { height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; margin-top: 4px; max-width: 320px; }
+        .quota-bar span { display: block; height: 100%; background: #2E7D32; }
+        .quota-bar span.full { background: #C62828; }
+        .quota-table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 10px 0; }
+        .quota-table th, .quota-table td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; vertical-align: middle; }
+        .btn-trash { background: #fff; color: #37474f; border: 1px solid #90a4ae; }
+        .btn-trash:hover { background: #eceff1; }
+        dialog.ws-trash { width: min(96vw, 820px); }
+        .ws-trash .trash-list { max-height: 55vh; overflow: auto; }
+        .ws-trash table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .ws-trash th, .ws-trash td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #eee; vertical-align: top; }
+        .ws-trash td.trash-name { word-break: break-word; font-weight: 500; }
+        .ws-trash small { color: #6B6B6B; }
+        .ws-trash .trash-actions { white-space: nowrap; }
+        .ws-trash .trash-actions button { min-height: 36px; padding: 0 10px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .ws-trash .btn-restore { background: #2E7D32; color: #fff; border: 0; }
+        .ws-trash .btn-purge { background: #fff; color: #C62828; border: 1px solid #C62828; }
+        @media (max-width: 600px) {
+            .ws-trash thead { display: none; }
+            .ws-trash tr { display: block; padding: 8px 0; border-bottom: 1px solid #eee; }
+            .ws-trash td { display: block; border: 0; padding: 2px 0; }
+            .ws-trash td[data-label]::before { content: attr(data-label) ": "; color: #6B6B6B; }
+            .ws-trash td.trash-name { font-weight: 600; font-size: 15px; }
+        }
         .share-expiry {
             margin-left: 4px; padding: 4px 6px; font-size: 12px; border: 1px solid #90a4ae;
             border-radius: 4px; background: #fff; color: #222; max-width: 100%;
@@ -2881,6 +2977,19 @@ function getRecentChanges($limit = 8) {
                     </a>
                     <?php endforeach; ?>
                 </div>
+            </div>
+
+            <div class="trash-bar">
+                <?php require_once __DIR__ . '/quota.php'; $qOwner = quota_owner($currentFolder); $qi = $qOwner ? quota_info($qOwner) : null; ?>
+                <?php if ($qi && $qi['quota']): ?>
+                <div class="quota-summary">
+                    <span><?= htmlspecialchars($qOwner) ?>: <?= htmlspecialchars(formatBytes($qi['used'])) ?> of <?= htmlspecialchars(formatBytes($qi['quota'])) ?> used</span>
+                    <div class="quota-bar" role="progressbar" aria-label="Storage used" aria-valuemin="0" aria-valuemax="100" aria-valuenow="<?= (int)$qi['percent'] ?>"><span style="width: <?= (int)$qi['percent'] ?>%" class="<?= $qi['percent'] >= 90 ? 'full' : '' ?>"></span></div>
+                </div>
+                <?php endif; ?>
+                <button type="button" class="btn btn-trash" onclick="openTrash()" title="Deleted files are kept here for <?= (int)trash_days() ?> days">
+                    🗑️ Trash<?php $tc = count(trash_list($currentUser)); if ($tc): ?> (<?= $tc ?>)<?php endif; ?>
+                </button>
             </div>
 
             <?php if (empty($files)): ?>
@@ -3545,7 +3654,7 @@ function getRecentChanges($limit = 8) {
                                 <input type="password" name="new_password" placeholder="Password" aria-label="Password for the new user" required minlength="8" autocomplete="new-password">
                                 <button type="submit" class="btn-user-add">+ Add</button>
                             </div>
-                            <small>Username: 3-20 characters (letters, numbers, - _). Password: min 4 characters.</small>
+                            <small>Username: 3-20 characters (letters, numbers, - _). Password: min 8 characters.</small>
                         </div>
                     </form>
 
@@ -3605,6 +3714,64 @@ function getRecentChanges($limit = 8) {
                     </form>
                 </div>
 
+                <!-- Storage Quotas (F1) -->
+                <?php require_once __DIR__ . '/quota.php'; $qUsersAll = loadUsers(); ?>
+                <div class="setting-group" style="margin-top: 30px;">
+                    <h3>📦 Storage Quotas</h3>
+                    <p class="setting-desc">Maximum size of each user's folder, in MB (0 = unlimited). Uploads by anyone into that folder count: the user, admins, API keys, shared-folder and anonymous uploads to /u/&lt;user&gt;. The trash and the Public folder do not count.</p>
+                    <form method="POST">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+                        <input type="hidden" name="save_quotas" value="1">
+                        <div class="setting-row">
+                            <label for="default_quota_mb">Default quota (MB) for users without their own value:</label>
+                            <input type="number" id="default_quota_mb" name="default_quota_mb" min="0" value="<?= (int)quota_site_default() ?>" style="padding: 10px; border: 1px solid #ddd; border-radius: 8px; width: 140px;">
+                        </div>
+                        <div style="overflow-x:auto; position: relative;">
+                        <table class="quota-table">
+                            <thead><tr><th>User</th><th>Used</th><th>Quota (MB)</th></tr></thead>
+                            <tbody>
+                            <?php foreach ($qUsersAll as $qName => $qData): $qi = quota_info($qName); ?>
+                                <tr>
+                                    <td><?= htmlspecialchars($qName) ?></td>
+                                    <td>
+                                        <?= htmlspecialchars(formatBytes($qi['used'])) ?>
+                                        <?php if ($qi['quota']): ?>
+                                            of <?= htmlspecialchars(formatBytes($qi['quota'])) ?>
+                                            <div class="quota-bar" role="progressbar" aria-label="Storage used by <?= htmlspecialchars($qName) ?>" aria-valuemin="0" aria-valuemax="100" aria-valuenow="<?= (int)$qi['percent'] ?>"><span style="width: <?= (int)$qi['percent'] ?>%" class="<?= $qi['percent'] >= 90 ? 'full' : '' ?>"></span></div>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><input type="number" name="quota[<?= htmlspecialchars($qName) ?>]" min="0" aria-label="Quota in MB for <?= htmlspecialchars($qName) ?>"
+                                               value="<?= array_key_exists('quota_mb', $qData) ? (int)$qData['quota_mb'] : '' ?>"
+                                               placeholder="default (<?= (int)quota_site_default() ?: '∞' ?>)" style="padding: 8px; border: 1px solid #ddd; border-radius: 8px; width: 140px;"></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                        </div>
+                        <small>Empty = use the default. Lowering a quota below the current usage does not delete anything; new uploads are refused until files are removed.</small><br>
+                        <button type="submit" class="btn btn-save" style="margin-top: 10px;">💾 Save quotas</button>
+                    </form>
+                </div>
+
+                <!-- Trash Section (F2) -->
+                <?php $tStats = trash_stats(); ?>
+                <div class="setting-group" style="margin-top: 30px;">
+                    <h3>🗑️ Trash</h3>
+                    <p class="setting-desc">Deleted files are moved to the trash and can be restored. They are removed for good after the number of days below.</p>
+                    <div class="setting-info" style="margin-bottom: 15px;">
+                        <strong>In trash now:</strong> <?= (int)$tStats['items'] ?> item(s), <?= htmlspecialchars(formatBytes($tStats['bytes'])) ?>
+                    </div>
+                    <form method="POST">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+                        <input type="hidden" name="save_trash" value="1">
+                        <div class="setting-row">
+                            <label for="trash_days">Keep deleted files (days, 0 = delete immediately):</label>
+                            <input type="number" id="trash_days" name="trash_days" min="0" max="365" value="<?= (int)trash_days() ?>" style="padding: 10px; border: 1px solid #ddd; border-radius: 8px; width: 120px;">
+                        </div>
+                        <button type="submit" class="btn btn-save" style="margin-top: 10px;">💾 Save</button>
+                    </form>
+                </div>
+
                 <!-- Public Access Section -->
                 <?php $openChat = $siteConfig['open_chat'] ?? true; ?>
                 <?php $openUpload = $siteConfig['open_upload'] ?? true; ?>
@@ -3626,6 +3793,31 @@ function getRecentChanges($limit = 8) {
                                 </span>
                             </label>
                             <small style="display: block; margin-top: 8px; color: #666;">Allow anyone to create and participate in chats without logging in.</small>
+                        </div>
+
+                        <div class="setting-row" style="margin-top: 10px;">
+                            <label style="display:flex; gap:8px; align-items:center; font-size:14px;">
+                                <input type="checkbox" name="link_previews" <?= ($siteConfig['link_previews'] ?? true) !== false ? 'checked' : '' ?>>
+                                Link previews show file and folder names (Viber, WhatsApp, Telegram …)
+                            </label>
+                            <small style="display: block; margin-top: 4px; color: #666;">Off: previews only say "WebShare". Password-protected folders and chats never show their name or content.</small>
+                        </div>
+
+                        <?php require_once __DIR__ . '/chat-guard.php'; $cgCfg = cg_config($siteConfig); ?>
+                        <div class="setting-row" style="margin-top: 10px;">
+                            <label style="display:flex; gap:8px; align-items:center; font-size:14px;">
+                                <input type="checkbox" name="chat_guard_enabled" <?= $cgCfg['enabled'] ? 'checked' : '' ?>>
+                                Protect anonymous chat creation (invisible browser check + limits)
+                            </label>
+                            <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin-top:8px;">
+                                <label style="font-size:13px;">New chats per IP per hour
+                                    <input type="number" name="chat_per_ip_hour" min="1" max="1000" value="<?= (int)$cgCfg['per_ip_hour'] ?>" style="padding:8px;border:1px solid #ddd;border-radius:8px;width:100%;margin-top:4px;">
+                                </label>
+                                <label style="font-size:13px;">Max active chats
+                                    <input type="number" name="chat_max_active" min="1" max="100000" value="<?= (int)$cgCfg['max_active'] ?>" style="padding:8px;border:1px solid #ddd;border-radius:8px;width:100%;margin-top:4px;">
+                                </label>
+                            </div>
+                            <small style="display: block; margin-top: 8px; color: #666;">Logged-in users are not checked. Trusted networks from Upload Protection skip the per-IP limit. Messages in an existing chat are limited separately (30 per minute per author, 90 per IP).</small>
                         </div>
 
                         <?php $ugCfg = ug_config($siteConfig); ?>
@@ -4525,6 +4717,9 @@ systemctl reload apache2</code>
                     currentXHR = null;
                     currentFileName = null;
                     isUploading = false;
+                    let msg = 'Upload failed (HTTP ' + xhr.status + ')';
+                    try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+                    WS.toast(msg, 'error', 0);
 
                     // Continue with next file even on error
                     if (uploadQueue.length > 0) {
@@ -4558,8 +4753,9 @@ systemctl reload apache2</code>
                 isUploading = false;
             });
 
-            // Send request
+            // Send request (the header makes the server answer errors as JSON)
             xhr.open('POST', window.location.href, true);
+            xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
             xhr.send(formData);
         }
 
@@ -5695,7 +5891,7 @@ systemctl reload apache2</code>
             WS.confirm({
                 title: 'Delete user "' + form.dataset.user + '"?',
                 message: files
-                    ? 'The account, its sessions and ALL ' + files + ' files (' + form.dataset.size + ') in its folder will be deleted permanently.'
+                    ? 'The account and its sessions will be deleted. Its folder with ALL ' + files + ' files (' + form.dataset.size + ') ' + (TRASH_DAYS > 0 ? 'goes to the trash, where an admin can restore it for ' + TRASH_DAYS + ' days.' : 'will be deleted permanently (the trash is off).')
                     : 'The account and its sessions will be deleted. The folder is empty.',
                 confirmText: 'Delete user',
                 danger: true
@@ -5727,12 +5923,84 @@ systemctl reload apache2</code>
             updateFileSelection();
         }
 
+        // ========================================
+        // Trash (F2)
+        // ========================================
+        const TRASH_DAYS = <?= (int)trash_days() ?>;
+
+        async function trashRequest(action, id) {
+            const fd = new FormData();
+            fd.append('trash_action', action);
+            if (id) fd.append('id', id);
+            fd.append('csrf_token', csrfToken);
+            const r = await fetch(window.location.pathname, { method: 'POST', body: fd });
+            return r.json();
+        }
+
+        async function openTrash() {
+            let data;
+            try { data = await trashRequest('list'); } catch (e) { WS.toast('Network error', 'error'); return; }
+            if (!data.success) { WS.toast(data.error || 'Could not load the trash', 'error'); return; }
+            const d = document.createElement('dialog');
+            d.className = 'ws-dialog ws-trash';
+            d.setAttribute('aria-labelledby', 'trash-title');
+            const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+            let html = '<div class="ws-dialog-body"><h2 id="trash-title">🗑️ Trash</h2>';
+            html += '<p>' + (data.days > 0 ? 'Items are deleted for good ' + data.days + ' days after they were deleted.' : 'The trash is off: deleted files are removed immediately.') + '</p>';
+            if (!data.items.length) {
+                html += '<p class="trash-empty-note">The trash is empty.</p>';
+            } else {
+                html += '<div class="trash-list" tabindex="0"><table><thead><tr><th>Name</th><th>From</th><th>Deleted</th><th>Size</th><th><span class="sr-only">Actions</span></th></tr></thead><tbody>';
+                for (const it of data.items) {
+                    html += '<tr data-id="' + esc(it.id) + '"><td class="trash-name">' + (it.type === 'folder' ? '📁 ' : '') + esc(it.name) + '</td>'
+                        + '<td data-label="From">' + esc(it.folder_h) + '</td>'
+                        + '<td data-label="Deleted">' + esc(WS.formatDate(it.deleted_at)) + '<br><small>by ' + esc(it.deleted_by) + ', removed ' + esc(WS.formatDate(it.expires_at)) + '</small></td>'
+                        + '<td data-label="Size">' + esc(it.size_h) + '</td>'
+                        + '<td class="trash-actions"><button type="button" class="btn-restore" data-act="restore">Restore</button> '
+                        + '<button type="button" class="btn-purge" data-act="delete" aria-label="Delete ' + esc(it.name) + ' permanently">Delete</button></td></tr>';
+                }
+                html += '</tbody></table></div>';
+            }
+            html += '</div><div class="ws-dialog-actions">';
+            if (data.items.length) html += '<button type="button" class="ws-danger" data-act="empty">Empty trash</button>';
+            html += '<button type="button" data-act="close">Close</button></div>';
+            d.innerHTML = html;
+            document.body.appendChild(d);
+            let changed = false;
+            const close = () => { d.close(); d.remove(); if (changed) window.location.reload(); };
+            d.addEventListener('cancel', e => { e.preventDefault(); close(); });
+            d.addEventListener('click', async e => {
+                const btn = e.target.closest('button[data-act]');
+                if (!btn) return;
+                const act = btn.dataset.act;
+                if (act === 'close') return close();
+                if (act === 'empty') {
+                    if (!(await WS.confirm({ title: 'Empty the trash?', message: 'All ' + data.items.length + ' item(s) will be deleted permanently.', confirmText: 'Empty trash', danger: true }))) return;
+                    const r = await trashRequest('empty');
+                    WS.flash(r.success ? r.deleted + ' item(s) deleted permanently' : (r.error || 'Error'), r.success ? 'success' : 'error');
+                    changed = true; return close();
+                }
+                const row = btn.closest('tr');
+                const name = row.querySelector('.trash-name').textContent;
+                if (act === 'delete' && !(await WS.confirm({ title: 'Delete permanently?', message: name, confirmText: 'Delete permanently', danger: true }))) return;
+                btn.disabled = true;
+                const r = await trashRequest(act, row.dataset.id);
+                if (!r.success) { btn.disabled = false; WS.toast(r.error || 'Error', 'error'); return; }
+                changed = true;
+                row.remove();
+                WS.toast(act === 'restore' ? 'Restored: ' + r.name + (r.folder ? ' (' + r.folder + ')' : '') : 'Deleted permanently', 'success');
+                if (!d.querySelector('tbody tr')) close();
+            });
+            d.showModal();
+            (d.querySelector('button[data-act="restore"]') || d.querySelector('button[data-act="close"]')).focus();
+        }
+
         async function deleteSelectedFiles() {
             const files = getSelectedFiles();
             if (files.length === 0) return;
             const ok = await WS.confirm({
                 title: files.length === 1 ? 'Delete 1 file?' : 'Delete ' + files.length + ' files?',
-                message: 'This cannot be undone.',
+                message: TRASH_DAYS > 0 ? 'The files go to the trash and can be restored for ' + TRASH_DAYS + ' days.' : 'This cannot be undone (the trash is off).',
                 items: files,
                 confirmText: files.length === 1 ? 'Delete file' : 'Delete ' + files.length + ' files',
                 danger: true
@@ -5750,7 +6018,7 @@ systemctl reload apache2</code>
             if (errors.length) {
                 WS.flash('Some files could not be deleted:\n' + errors.join('\n'), 'error');
             } else {
-                WS.flash(files.length === 1 ? '1 file deleted' : files.length + ' files deleted', 'success');
+                WS.flash((files.length === 1 ? '1 file' : files.length + ' files') + (TRASH_DAYS > 0 ? ' moved to the trash' : ' deleted'), 'success');
             }
             window.location.reload();
         }

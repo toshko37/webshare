@@ -1,8 +1,7 @@
 <?php
 /**
  * WebShare Live Update
- * Downloads and installs updates from GitHub (raw.githubusercontent.com, main branch)
- * Same source as the shell update script
+ * Downloads and installs the latest signed GitHub release (F5, docs/decisions.md D-026)
  */
 
 require_once __DIR__ . '/security-check.php';
@@ -52,63 +51,11 @@ if (!isAdmin(getCurrentUser())) {
     exit;
 }
 
-// Updates come only from GitHub (stable releases). The former beta channel
-// (webshare.techbg.net) was removed: that server executes PHP instead of
-// serving its source, see docs/decisions.md D-022/D-023.
-$sourceUrl = 'https://raw.githubusercontent.com/toshko37/webshare/main/src';
-
-// Files to update (same list as update.sh)
-// NOTE: security-check.php, login.php, logout.php are listed FIRST so they're
-// always downloaded even when this script itself is the old version being replaced.
-$phpFiles = [
-    'security-check.php',
-    'login.php',
-    'logout.php',
-    'index.php',
-    'upload.php',
-    'upload-guard.php',
-    'error-page.php',
-    'auth-guard.php',
-    'json-store.php',
-    'public.php',
-    'download.php',
-    't.php',
-    'text.php',
-    'share.php',
-    'folder-management.php',
-    'encryption.php',
-    'audit-log.php',
-    'geo-check.php',
-    'user-management.php',
-    'html-sanitizer.php',
-    'smtp-mailer.php',
-    'send-mail.php',
-    'web-download.php',
-    'api-upload.php',
-    'api-scripts.php',
-    'check-version.php',
-    'do-update.php',
-    'live-update.php',
-    'p.php',
-    'u.php',
-    'f.php',
-    'get.php',
-    'get-speedtest.php',
-    'get-update.php',
-    'get-update-script.php',
-    'security-headers.php'
-];
-
-$otherFiles = [
-    'ui-kit.css',
-    'ui-kit.js',
-    'favicon.ico',
-    'favicon.svg',
-    'apple-touch-icon.png',
-    'CHANGELOG.md',
-    'version.json',
-    'robots.txt'
-];
+// Updates come only from GitHub releases (D-023), and only signed ones (F5, D-026):
+// files are taken from the release tag, the file list and SHA-256 hashes from
+// src/release-manifest.json, which must carry a valid Ed25519 signature.
+require_once __DIR__ . '/release-verify.php';
+const WS_REPO = 'toshko37/webshare';
 
 $installDir = __DIR__;
 $tempDir = sys_get_temp_dir() . '/webshare-live-update-' . getmypid();
@@ -122,27 +69,33 @@ $result = [
     'files_failed' => []
 ];
 
-// Helper function to download a file
-function downloadFile($url, $dest) {
+// Download a URL; returns the body or null
+function fetchUrl($url, $timeout = 30) {
     $ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_URL => $url,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_TIMEOUT => 30,
+        CURLOPT_TIMEOUT => $timeout,
         CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_HTTPHEADER => ['User-Agent: WebShare-LiveUpdater']
+        CURLOPT_HTTPHEADER => ['User-Agent: WebShare-LiveUpdater', 'Accept: application/vnd.github+json']
     ]);
     $content = curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $error = curl_error($ch);
     curl_close($ch);
+    return ($httpCode === 200 && is_string($content)) ? $content : null;
+}
 
-    if ($httpCode === 200 && $content !== false && strlen($content) > 0) {
-        file_put_contents($dest, $content);
-        return true;
+// Latest release version: GitHub API, fallback version.json on main
+function latestReleaseVersion() {
+    $api = fetchUrl('https://api.github.com/repos/' . WS_REPO . '/releases/latest', 15);
+    $tag = $api ? (json_decode($api, true)['tag_name'] ?? '') : '';
+    if (!preg_match('/^v?(\d+\.\d+\.\d+)$/', $tag, $m)) {
+        $vj = fetchUrl('https://raw.githubusercontent.com/' . WS_REPO . '/main/src/version.json', 15);
+        $v = $vj ? (json_decode($vj, true)['version'] ?? '') : '';
+        if (!preg_match('/^(\d+\.\d+\.\d+)$/', $v, $m)) return null;
     }
-    return false;
+    return $m[1];
 }
 
 // Helper to recursively delete directory
@@ -157,54 +110,52 @@ function deleteDir($dir) {
 }
 
 try {
-    // Step 1: Create temp directory
-    $result['steps'][] = ['step' => 'Creating temp directory', 'status' => 'running'];
-    if (!mkdir($tempDir, 0755, true)) {
+    // Step 1: Find and verify the release
+    $result['steps'][] = ['step' => 'Verifying release signature', 'status' => 'running'];
+    $version = latestReleaseVersion();
+    if (!$version) {
+        throw new Exception('Could not determine the latest release from GitHub');
+    }
+    $sourceUrl = 'https://raw.githubusercontent.com/' . WS_REPO . '/v' . $version . '/src';
+    $manifestJson = fetchUrl("$sourceUrl/release-manifest.json");
+    $signature = fetchUrl("$sourceUrl/release-manifest.sig");
+    if ($manifestJson === null || $signature === null) {
+        throw new Exception("Release v$version is not signed (no release-manifest); nothing was changed");
+    }
+    $verified = ws_release_verify_manifest($manifestJson, $signature);
+    if (!$verified['ok']) {
+        throw new Exception("Release v$version rejected: " . $verified['error'] . '; nothing was changed');
+    }
+    $manifest = $verified['manifest'];
+    if ($manifest['version'] !== $version) {
+        throw new Exception("Release manifest is for v{$manifest['version']}, expected v$version; nothing was changed");
+    }
+    $result['steps'][count($result['steps'])-1]['status'] = 'done';
+    $result['steps'][count($result['steps'])-1]['detail'] = "v$version, " . count($manifest['files']) . ' files, signature OK';
+    $result['version'] = $version;
+
+    // Step 2: Download every file and check its hash
+    $result['steps'][] = ['step' => 'Downloading files', 'status' => 'running'];
+    if (!mkdir($tempDir, 0700, true)) {
         throw new Exception('Failed to create temp directory');
     }
-    $result['steps'][count($result['steps'])-1]['status'] = 'done';
-
-    // Step 2: Download all PHP files to temp
-    $result['steps'][] = ['step' => 'Downloading PHP files', 'status' => 'running'];
-    $downloadedFiles = [];
-
-    foreach ($phpFiles as $file) {
-        $url = "$sourceUrl/$file";
-        $dest = "$tempDir/$file";
-
-        if (downloadFile($url, $dest)) {
-            // A PHP file must arrive as source. A web server that executes it
-            // (e.g. the dev channel) returns HTML; installing that would break the site.
-            if (strncmp(ltrim(file_get_contents($dest, false, null, 0, 64), "\xEF\xBB\xBF"), '<?php', 5) !== 0) {
-                throw new Exception("$file did not arrive as PHP source from $sourceUrl; update aborted, nothing was changed");
-            }
-            $downloadedFiles[] = $file;
-        } else {
-            $result['files_failed'][] = $file;
+    foreach ($manifest['files'] as $path => $hash) {
+        $content = fetchUrl("$sourceUrl/$path");
+        if ($content === null) {
+            throw new Exception("Download failed: $path; nothing was changed");
         }
-    }
-
-    // Download other files
-    foreach ($otherFiles as $file) {
-        $url = "$sourceUrl/$file";
-        $dest = "$tempDir/$file";
-        downloadFile($url, $dest); // Optional files, don't fail if missing
-    }
-
-    // .htaccess is tracked as is; .user.ini is tracked as user.ini.txt (dotfile is git-ignored)
-    downloadFile("$sourceUrl/.htaccess", "$tempDir/.htaccess");
-    downloadFile("$sourceUrl/user.ini.txt", "$tempDir/.user.ini");
-
-    $result['steps'][count($result['steps'])-1]['status'] = 'done';
-    $result['steps'][count($result['steps'])-1]['detail'] = count($downloadedFiles) . ' files downloaded';
-
-    // Verify critical files were downloaded
-    $criticalFiles = ['index.php', 'upload.php', 'folder-management.php'];
-    foreach ($criticalFiles as $critical) {
-        if (!file_exists("$tempDir/$critical") || filesize("$tempDir/$critical") < 1000) {
-            throw new Exception("Critical file failed to download: $critical");
+        if (!hash_equals($hash, hash('sha256', $content))) {
+            throw new Exception("Checksum mismatch: $path; nothing was changed");
         }
+        // user.ini.txt is the git copy of .user.ini
+        $target = $path === 'user.ini.txt' ? '.user.ini' : $path;
+        @mkdir(dirname("$tempDir/$target"), 0700, true);
+        file_put_contents("$tempDir/$target", $content);
     }
+    file_put_contents("$tempDir/release-manifest.json", $manifestJson);
+    file_put_contents("$tempDir/release-manifest.sig", $signature);
+    $result['steps'][count($result['steps'])-1]['status'] = 'done';
+    $result['steps'][count($result['steps'])-1]['detail'] = count($manifest['files']) . ' files downloaded and verified';
 
     // Step 3: Create backup
     $result['steps'][] = ['step' => 'Creating backup', 'status' => 'running'];
@@ -228,21 +179,18 @@ try {
     $result['steps'][] = ['step' => 'Installing update', 'status' => 'running'];
     $installedCount = 0;
 
-    // Copy all downloaded files
-    foreach (glob("$tempDir/*") as $file) {
-        if (is_file($file)) {
-            $filename = basename($file);
-            $dest = "$installDir/$filename";
-            if (copy($file, $dest)) {
-                $installedCount++;
-            }
+    // Copy all verified files (subdirectories and .htaccess / .user.ini included)
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($tempDir, FilesystemIterator::SKIP_DOTS));
+    foreach ($it as $file) {
+        if (!$file->isFile()) continue;
+        $rel = substr($file->getPathname(), strlen($tempDir) + 1);
+        $dest = "$installDir/$rel";
+        @mkdir(dirname($dest), 0755, true);
+        if (copy($file->getPathname(), $dest)) {
+            $installedCount++;
+        } else {
+            $result['files_failed'][] = $rel;
         }
-    }
-
-    // Copy .htaccess if exists
-    if (file_exists("$tempDir/.htaccess")) {
-        copy("$tempDir/.htaccess", "$installDir/.htaccess");
-        $installedCount++;
     }
 
     $result['files_updated'] = $installedCount;

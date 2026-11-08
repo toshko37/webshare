@@ -133,8 +133,10 @@ $wasOverwritten = false;
 // Handle existing files
 if (file_exists($targetPath)) {
     if ($overwrite) {
-        // Delete existing file
-        unlink($targetPath);
+        // F2: the replaced version goes to the trash
+        require_once __DIR__ . '/trash.php';
+        $res = trash_move_file($folder ?: $user, basename($targetPath), $user);
+        if (!$res['success']) @unlink($targetPath);
         $wasOverwritten = true;
     } else {
         // Add datetime suffix (more readable than random)
@@ -148,6 +150,14 @@ if (file_exists($targetPath)) {
             $targetPath = $uploadDir . $finalName;
         }
     }
+}
+
+// F1: storage quota of the target folder's owner
+require_once __DIR__ . '/quota.php';
+if ($qe = quota_check($folder ?: $user, (int)$file['size'])) {
+    http_response_code(413);
+    echo json_encode(['success' => false, 'error' => $qe]);
+    exit;
 }
 
 // Move uploaded file

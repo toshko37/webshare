@@ -21,6 +21,15 @@ if (!($config['open_chat'] ?? true)) {
     require_once __DIR__ . '/security-check.php';
 }
 
+// F8: anonymous chat creation needs an invisible proof-of-work and is rate limited
+require_once __DIR__ . '/chat-guard.php';
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($_GET['guard'] ?? '') === 'challenge') {
+    header('Content-Type: application/json');
+    header('Cache-Control: no-store');
+    echo json_encode(['success' => true] + ug_create_challenge(ug_config()));
+    exit;
+}
+
 // CONFIGURATION
 define('TEXT_EXPIRE_HOURS', 24);
 define('TEXT_MAX_SIZE', 1000000);
@@ -646,6 +655,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create'])) {
         exit;
     }
 
+    // F8: browser check and limits for anonymous chat creation
+    $cgError = cg_check_create(json_decode($_POST['pow'] ?? '', true), loadMetadata($metadataFile));
+    if ($cgError) {
+        http_response_code($cgError[2]);
+        echo json_encode(['success' => false, 'code' => $cgError[0], 'error' => $cgError[1]]);
+        exit;
+    }
+
     // Generate unique token
     $newToken = generateToken(32);
     $jsonPath = $textsDir . '.' . $newToken . '.json';
@@ -699,6 +716,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create'])) {
 
     saveMetadata($metadataFile, $metadata);
 
+    cg_record_create();
     writeAuditLog('text_create', "Created conversation: $newToken (" . strlen($html) . " chars)", 'anonymous');
 
     $viewUrl = 'https://' . $_SERVER['HTTP_HOST'] . '/t/' . $newToken;
@@ -759,7 +777,7 @@ if ($isViewMode) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($pageTitle) ?> - Chat</title>
+    <title><?= htmlspecialchars($pageTitle) ?> - Chat</title><?php require_once __DIR__ . '/link-preview.php'; /* F7: chats never reveal content in previews */ echo lp_meta_tags('💬 Чат в WebShare', 'Покана за разговор · отвори линка, за да видиш съобщенията'); ?>
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -1978,7 +1996,7 @@ if ($isViewMode) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Start Conversation - WebShare</title>
+    <title>Start Conversation - WebShare</title><?php require_once __DIR__ . '/link-preview.php'; echo lp_meta_tags('💬 Нов чат в WebShare', 'Започни разговор и сподели линка'); ?>
     <link rel="icon" type="image/x-icon" href="/favicon.ico">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -2277,6 +2295,32 @@ if ($isViewMode) {
         // Update color dot on input
         document.getElementById('author-name').addEventListener('input', updateColorDot);
 
+        const CHAT_GUARD = <?= json_encode(cg_config()['enabled'] && !cg_exempt()) ?>;
+
+        async function sha256Hex(text) {
+            const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+            return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        // Same proof-of-work as the upload page: find n with sha256(salt + n) === challenge
+        async function chatGuardProof() {
+            if (!CHAT_GUARD) return null;
+            if (!window.crypto || !crypto.subtle) throw new Error('Браузърът не поддържа проверката. Използвай HTTPS и съвременен браузър.');
+            const ch = await (await fetch('/t?guard=challenge', { cache: 'no-store', credentials: 'same-origin' })).json();
+            const batch = 500;
+            for (let start = 0; start <= ch.maxnumber; start += batch) {
+                const jobs = [];
+                for (let n = start; n < start + batch && n <= ch.maxnumber; n++) {
+                    jobs.push(sha256Hex(ch.salt + n).then(h => h === ch.challenge ? n : -1));
+                }
+                const found = (await Promise.all(jobs)).find(n => n >= 0);
+                if (found !== undefined) {
+                    return { algorithm: ch.algorithm, challenge: ch.challenge, salt: ch.salt, signature: ch.signature, number: found };
+                }
+            }
+            throw new Error('Проверката не успя. Презареди страницата.');
+        }
+
         function startConversation() {
             const html = quill.root.innerHTML;
             const text = quill.getText().trim();
@@ -2301,9 +2345,11 @@ if ($isViewMode) {
             formData.append('html', html);
             formData.append('author', author);
 
-            fetch('/t', {
-                method: 'POST',
-                body: formData
+            // F8: invisible browser check (proof-of-work), skipped for logged-in users
+            chatGuardProof()
+            .then(pow => {
+                if (pow) formData.append('pow', JSON.stringify(pow));
+                return fetch('/t', { method: 'POST', body: formData });
             })
             .then(response => response.json())
             .then(data => {
@@ -2321,13 +2367,13 @@ if ($isViewMode) {
                         window.location.href = data.view_url;
                     });
                 } else {
-                    alert('Error: ' + data.error);
+                    WS.toast(data.error || 'Грешка при създаване.', 'error');
                 }
             })
             .catch(error => {
                 loading.classList.remove('show');
                 startBtn.disabled = false;
-                alert('Грешка при създаване. Опитай отново.');
+                WS.toast(error && error.message ? error.message : 'Грешка при създаване. Опитай отново.', 'error');
             });
         }
 

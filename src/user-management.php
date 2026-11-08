@@ -94,10 +94,9 @@ function deleteUser($username) {
     }
     // Close all sessions for deleted user
     logoffAllForUser($username);
-    // Delete user's folder and all files inside
-    if (function_exists('deleteUserFolder')) {
-        deleteUserFolder($username, true);
-    }
+    // F2: the user's folder goes to the trash as one item (restorable by admin)
+    require_once __DIR__ . '/trash.php';
+    trash_move_folder($username, getCurrentUser(), "User $username");
     return ['success' => true];
 }
 

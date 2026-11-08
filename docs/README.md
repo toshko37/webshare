@@ -7,6 +7,11 @@
 | [upload-guard.md](upload-guard.md) | Защита на анонимното качване: режими, проверка, пропуски, лимити, curl, админ панел, данни, тестове |
 | [security-hardening.md](security-hardening.md) | Спешните точки U2–U11: поправки, защита от налучкване, fail2ban, права |
 | [security-plan-2.md](security-plan-2.md) | Важните точки I1–I16 и група 4: план, статус, тестове |
+| [features-plan.md](features-plan.md) | Нови функции F1, F2, F5, F7, F8: ред на интеграция и статус |
+| [trash.md](trash.md) | Кошче |
+| [quotas.md](quotas.md) | Квоти по потребител |
+| [chat-guard.md](chat-guard.md) | Защита на анонимния чат |
+| [link-previews.md](link-previews.md) | Прегледи на линкове и ZIP във фонов режим |
 | [backup.md](backup.md) | Архивиране: какво, къде, колко дълго, възстановяване |
 | [decisions.md](decisions.md) | Дневник на решенията с контекст и причини |
 | [audit-2026-11-08.md](audit-2026-11-08.md) | Технически одит и статус на всяка находка |
@@ -25,6 +30,10 @@ tests/security-test.sh https://webshare.techbg.net        # end-to-end, като
 php -d memory_limit=128M tests/encryption-unit.php --big  # криптиране v1/v2, 300 MB на поток
 php tests/manifest-test.php                               # списъците на файловете са в синхрон
 php tests/json-store-test.php                             # паралелни записи в JSON (I4)
+php tests/trash-unit.php ; php tests/quota-unit.php       # кошче, квоти
+php tests/chat-guard-unit.php ; php tests/link-preview-unit.php
+php tests/release-sign-test.php                           # подписи на версиите (като root)
+php tools/sign-release.php --verify-remote <версия>       # проверка на публикувана версия в GitHub
 ```
 
 ## Правила за документацията

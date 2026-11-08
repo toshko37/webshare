@@ -31,6 +31,8 @@ function loadFolderShares() {
 
 // I4: +1 view under the lock (parallel views/downloads must not overwrite each other or a share change)
 function folderShareCountView($token) {
+    // F7: link preview bots are not visitors
+    if (preg_match('/facebookexternalhit|Facebot|Twitterbot|TelegramBot|WhatsApp|Viber|Slackbot|Discordbot|LinkedInBot|SkypeUriPreview|redditbot|Embedly/i', $_SERVER['HTTP_USER_AGENT'] ?? '')) return;
     ws_json_update(FOLDER_SHARES_FILE, function (&$shares) use ($token) {
         if (!isset($shares[$token])) return false;
         $shares[$token]['views'] = ($shares[$token]['views'] ?? 0) + 1;
@@ -152,31 +154,6 @@ function flattenItems($items, &$result = []) {
     return $result;
 }
 
-// Create ZIP of folder
-function createFolderZip($folderPath, $folderName) {
-    $zipName = sys_get_temp_dir() . '/' . $folderName . '_' . time() . '.zip';
-    $zip = new ZipArchive();
-
-    if ($zip->open($zipName, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== TRUE) {
-        return false;
-    }
-
-    $files = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($folderPath, RecursiveDirectoryIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::LEAVES_ONLY
-    );
-
-    foreach ($files as $file) {
-        if (!$file->isDir()) {
-            $filePath = $file->getRealPath();
-            $relativePath = substr($filePath, strlen($folderPath) + 1);
-            $zip->addFile($filePath, $relativePath);
-        }
-    }
-
-    $zip->close();
-    return $zipName;
-}
 
 // Get token from request
 $token = $_GET['token'] ?? '';
@@ -257,17 +234,48 @@ if ($action === 'file' && $isAuthenticated && isset($_GET['path'])) {
     wsErrorPage(404, 'Файлът липсва', 'Файлът е изтрит или преместен.');
 }
 
-// Handle ZIP download
-if ($action === 'download' && $isAuthenticated) {
-    $zipFile = createFolderZip($folderPath, $folderName);
-    if ($zipFile && file_exists($zipFile)) {
-        writeAuditLog('folder_zip_download', "Downloaded ZIP: {$share['folder']}");
+// F7: background ZIP (start / status / get); the page polls and then downloads
+if (in_array($action, ['zip_start', 'zip_status', 'zip_get'], true) && $isAuthenticated) {
+    require_once __DIR__ . '/zip-job.php';
+    $owner = 'f:' . $token;
+    if ($action === 'zip_get') {
+        if (zj_send($_GET['job'] ?? '', $owner)) {
+            writeAuditLog('folder_zip_download', "Downloaded ZIP: {$share['folder']}");
+            exit;
+        }
+        wsErrorPage(404, 'Архивът не е готов', 'Архивът изтече или още се създава. Опитай отново.');
+    }
+    header('Content-Type: application/json');
+    header('Cache-Control: no-store');
+    if ($action === 'zip_status') {
+        $st = zj_status($_GET['job'] ?? '', $owner);
+        echo json_encode($st ? ['success' => true] + $st : ['success' => false, 'error' => 'Unknown job']);
+        exit;
+    }
+    $job = zj_start($folderPath, $folderName, $owner);
+    echo json_encode(['success' => true, 'job' => $job]);
+    // Build after the answer is out, so the browser is not left waiting
+    session_write_close();
+    if (function_exists('fastcgi_finish_request')) fastcgi_finish_request();
+    ignore_user_abort(true);
+    set_time_limit(0);
+    zj_build($job, $folderPath);
+    exit;
+}
 
-        header('Content-Type: application/zip');
-        header('Content-Disposition: attachment; filename="' . $folderName . '.zip"');
-        header('Content-Length: ' . filesize($zipFile));
-        readfile($zipFile);
-        unlink($zipFile);
+// Handle ZIP download (synchronous; fallback without JavaScript). Uses the same
+// job store as the background ZIP, so the archive is reused and cleaned up after
+// an hour even when the download is interrupted (it used to stay in /tmp).
+if ($action === 'download' && $isAuthenticated) {
+    require_once __DIR__ . '/zip-job.php';
+    $owner = 'f:' . $token;
+    session_write_close();
+    set_time_limit(0);
+    $job = zj_start($folderPath, $folderName, $owner);
+    zj_build($job, $folderPath);   // no-op when the job is already built
+    for ($i = 0; $i < 3600 && (zj_status($job, $owner)['status'] ?? '') === 'running'; $i++) sleep(1);   // built by another request
+    if (zj_send($job, $owner)) {
+        writeAuditLog('folder_zip_download', "Downloaded ZIP: {$share['folder']}");
         exit;
     }
     wsErrorPage(500, 'Архивът не можа да се създаде', 'Опитай отново или изтегли файловете един по един.');
@@ -307,6 +315,14 @@ if ($action === 'upload' && $isAuthenticated && !empty($share['allow_upload'])) 
         $counter++;
     }
 
+    // F1: the upload counts towards the shared folder owner's quota
+    require_once __DIR__ . '/quota.php';
+    if ($qe = quota_check($share['folder'], (int)$file['size'])) {
+        http_response_code(413);
+        echo json_encode(['success' => false, 'error' => $qe]);
+        exit;
+    }
+
     if (move_uploaded_file($file['tmp_name'], $targetPath)) {
         writeAuditLog('folder_upload', "Uploaded to {$share['folder']}: $filename (" . formatFileSize($file['size']) . ")");
 
@@ -333,8 +349,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_file']) && $is
     $fullPath = $folderPath . '/' . $filePath;
 
     if (file_exists($fullPath) && is_file($fullPath) && strpos(realpath($fullPath), realpath($folderPath)) === 0) {
-        if (unlink($fullPath)) {
-            writeAuditLog('folder_delete', "Deleted from {$share['folder']}: $filePath");
+        // F2: to the trash of the folder's owner
+        require_once __DIR__ . '/trash.php';
+        $sub = trim(dirname($filePath), './');
+        $res = trash_move_file($share['folder'] . ($sub !== '' ? '/' . $sub : ''), basename($fullPath), 'share:' . substr($token, 0, 8));
+        if ($res['success']) {
+            writeAuditLog('folder_delete', ($res['id'] ? 'Moved to trash' : 'Deleted') . " from {$share['folder']}: $filePath");
             echo json_encode(['success' => true]);
         } else {
             echo json_encode(['success' => false, 'error' => 'Failed to delete']);
@@ -360,13 +380,31 @@ if ($isAuthenticated) {
 
 $siteConfig = loadSiteConfig();
 $siteName = $siteConfig['site_name'] ?? 'WebShare';
+
+// F7: link preview card (password-protected folders do not reveal name or contents)
+require_once __DIR__ . '/link-preview.php';
+if (!lp_enabled()) {
+    $ogTitle = 'WebShare';
+    $ogDesc = 'Споделена папка';
+} elseif ($needsPassword) {
+    $ogTitle = '🔒 Защитена папка';
+    $ogDesc = 'Папка, защитена с парола · споделена чрез WebShare';
+} else {
+    $ogCount = 0;
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($folderPath, FilesystemIterator::SKIP_DOTS)) as $ogF) {
+        if ($ogF->isFile() && ++$ogCount >= 10000) break;
+    }
+    $ogTitle = '📁 ' . $folderName;
+    $ogDesc = 'Споделена папка · ' . $ogCount . ($ogCount === 1 ? ' файл' : ' файла')
+        . (!empty($share['allow_upload']) ? ' · може да се качва' : '') . ' · WebShare';
+}
 ?>
 <!DOCTYPE html>
 <html lang="bg">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($folderName) ?> - <?= htmlspecialchars($siteName) ?></title>
+    <title><?= htmlspecialchars($folderName) ?> - <?= htmlspecialchars($siteName) ?></title><?= lp_meta_tags($ogTitle, $ogDesc) ?>
     <style>
         * {
             margin: 0;
@@ -776,7 +814,7 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
                         📊 <?= $fileCount ?> файла (<?= formatFileSize($totalSize) ?>)
                     </div>
                     <?php if ($fileCount > 0): ?>
-                    <a href="/f/<?= $token ?>/download" class="btn btn-secondary">
+                    <a href="/f/<?= $token ?>/download" class="btn btn-secondary" id="zipBtn" onclick="return startZip(event)">
                         📦 Изтегли всички (.zip)
                     </a>
                     <?php endif; ?>
@@ -948,5 +986,34 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
         <?php endif; ?>
     </script>
     <?php endif; ?>
+    <script>
+    // F7: the archive is built in the background; show progress, then download
+    async function startZip(e) {
+        if (!window.fetch) return true;   // old browser: normal (synchronous) download
+        e.preventDefault();
+        const btn = document.getElementById('zipBtn');
+        if (btn.dataset.busy) return false;
+        btn.dataset.busy = '1';
+        const label = btn.textContent;
+        const base = '/f/<?= htmlspecialchars($token, ENT_QUOTES) ?>?action=';
+        try {
+            const start = await (await fetch(base + 'zip_start', { credentials: 'same-origin' })).json();
+            if (!start.success) throw new Error(start.error || 'error');
+            for (;;) {
+                const st = await (await fetch(base + 'zip_status&job=' + start.job, { credentials: 'same-origin', cache: 'no-store' })).json();
+                if (!st.success || st.status === 'failed') throw new Error(st.error || 'error');
+                if (st.status === 'done') { window.location.href = base + 'zip_get&job=' + start.job; break; }
+                btn.textContent = '⏳ Подготвям архива… ' + (st.progress || 0) + '%';
+                await new Promise(r => setTimeout(r, 1000));
+            }
+            btn.textContent = label;
+        } catch (err) {
+            btn.textContent = '⚠️ Архивът не се създаде — опитай пак';
+            setTimeout(() => { btn.textContent = label; }, 4000);
+        }
+        delete btn.dataset.busy;
+        return false;
+    }
+    </script>
 </body>
 </html>

@@ -226,6 +226,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'])) {
         }
     }
 
+    // F1: anonymous uploads to /u/<user> count towards that user's quota (Public has none)
+    if (!$guardError && $file['error'] === UPLOAD_ERR_OK) {
+        require_once __DIR__ . '/quota.php';
+        if ($qe = quota_check($targetFolder, (int)$file['size'])) {
+            $guardError = ['quota', $qe, 413];
+        }
+    }
+
     if ($guardError) {
         // PHP deletes the temporary upload automatically at the end of the request
         $error = uploadReject($guardError[0], $guardError[1], $guardError[2], $isAjax, $isCli, $selfUrl, $pass);

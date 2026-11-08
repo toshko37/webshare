@@ -102,3 +102,8 @@ logs/
 
 # Lock files of the JSON store (src/json-store.php)
 *.json.lock
+
+# Trash (F2): deleted files, outside the DocumentRoot
+trash/
+src/.chat-guard-state.json
+tmp/

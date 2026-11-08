@@ -301,6 +301,14 @@ if (!$success || $downloadedSize == 0) {
     exit;
 }
 
+// F1: storage quota (the size is only known after the download)
+require_once __DIR__ . '/quota.php';
+if ($qe = quota_check($currentFolder, (int)filesize($tempFile))) {
+    @unlink($tempFile);
+    echo json_encode(['success' => false, 'error' => $qe]);
+    exit;
+}
+
 // Move to target
 if (!@rename($tempFile, $targetPath)) {
     // Try copy if rename fails (cross-device)

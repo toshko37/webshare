@@ -9,6 +9,12 @@ upload-guard.php
 error-page.php
 auth-guard.php
 json-store.php
+release-verify.php
+trash.php
+quota.php
+chat-guard.php
+link-preview.php
+zip-job.php
 public.php
 download.php
 t.php
@@ -44,5 +50,6 @@ apple-touch-icon.png
 CHANGELOG.md
 version.json
 robots.txt
+og-image.png
 assets/quill/quill.js
 assets/quill/quill.snow.css

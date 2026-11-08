@@ -5,7 +5,7 @@
  * Handles user folders, permissions, and file operations between folders
  */
 
-define('FILES_BASE_DIR', __DIR__ . '/files/');
+if (!defined('FILES_BASE_DIR')) define('FILES_BASE_DIR', __DIR__ . '/files/');
 define('PUBLIC_FOLDER', '_public');
 define('MAX_SUBFOLDER_DEPTH', 3); // Maximum folder nesting level
 

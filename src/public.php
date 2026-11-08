@@ -65,6 +65,17 @@ if (strpos($realPath, $realDir) !== 0) {
 // Check if file is encrypted
 $isEncrypted = isEncryptedFile($filename);
 
+// F7: messenger preview bots get a card, not the file (nothing is downloaded or logged)
+require_once __DIR__ . '/link-preview.php';
+if (lp_is_preview_bot() && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    if (!lp_enabled()) {
+        lp_bot_page('WebShare', 'Споделен файл');
+    }
+    $shown = $isEncrypted ? getOriginalFilename($filename) : $filename;
+    lp_bot_page('📄 ' . $shown, ($isEncrypted ? 'Криптиран файл · ' : 'Файл · ') . lp_size(filesize($filePath)) . ' · споделен чрез WebShare'
+        . (!empty($fileData['expires']) ? ' · валиден до ' . date('d.m.Y', $fileData['expires']) : ''));
+}
+
 // Handle encrypted file download
 if ($isEncrypted) {
     // Check if password was provided
