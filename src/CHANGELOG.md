@@ -2,6 +2,40 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.8.0] - 2026-11-08
+
+### Important: updates come only from GitHub
+- **The beta/dev update channel was removed.** Live update, the version check and all installer/update scripts now use GitHub only.
+- **Installs that were on the beta channel** must run the first update to 3.8.0 manually: `sudo /var/www/webshare/installer/update.sh -y`. Live update aborts safely there and changes nothing.
+
+### Encryption (new file format v2)
+- **Stronger keys.** Keys are derived with Argon2id and a salt. Servers without libsodium use PBKDF2-SHA256 with 600,000 iterations.
+- **Streamed processing.** Files are encrypted and decrypted in 1 MiB authenticated chunks, so large files work. A 300 MB file needs about 16 MB of memory.
+- **Damaged files are detected.** Truncated or modified files are rejected.
+- **Password check.** The password is verified by decryption itself, so files with the same name in different folders no longer collide.
+- **Older files still work.** Files encrypted by earlier versions still decrypt.
+
+### Security
+- **Public link expiry.** Each public link can expire after 1, 7, 30 or 90 days, or never. Expired links show a clear page. Existing links are unchanged.
+- **API keys.**
+  - Keys are stored only as a SHA-256 hash and shown once at creation. Existing keys were migrated automatically and keep working.
+  - Keys are no longer accepted in the URL. Use the `X-API-Key` header.
+  - Windows script downloads ask for the key.
+- **Changing your own password.** The current password is now required. New passwords must have at least 8 characters.
+- **Security headers.** A Content-Security-Policy and a Permissions-Policy were added, and duplicate headers were removed.
+- **GeoIP.** Proxy headers are trusted only from the configured trusted proxies (Settings → Geo).
+- **Chat rate limit.** The limit is now also counted per IP address.
+- **Share links.** "New ID" and "Revoke" now match the folder as well as the file name, and check access.
+- **Audit log.** A login is recorded only once.
+
+### Installation and server hardening
+- **Fixed broken fresh installs.** The installer file lists were out of date. All installers now read `src/manifest.txt`.
+- **New `installer/harden.sh`.** It runs on install and update. It is safe to run more than once, and it:
+  - sets the permissions of data files;
+  - writes failed logins and passwords to `logs/auth.log` and adds a fail2ban jail;
+  - configures log rotation;
+  - sets up the daily backup when there is enough disk space.
+
 ## [3.7.1] - 2026-11-08
 
 ### Security fixes
@@ -769,6 +803,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.8.0  | 2026-11-08 | Encryption v2, hashed API keys, link expiry, CSP, installer hardening; GitHub-only updates |
 |  3.7.1  | 2026-11-08 | Security hardening: open redirect, API encryption, brute-force limits, fail2ban, robots |
 |  3.7.0  | 2026-11-08 | Upload Guard for anonymous uploads, UI/UX accessibility and mobile overhaul |
 |  3.6.20  | 2026-09-27 | Free disk space indicator in header |

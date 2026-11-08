@@ -1,6 +1,6 @@
 {
-    "version": "3.7.1",
+    "version": "3.8.0",
     "released": "2026-11-08",
-    "changelog": "Security hardening: open redirect, API encryption, brute-force limits, fail2ban, robots",
+    "changelog": "Encryption v2, hashed API keys, link expiry, CSP, installer hardening; GitHub-only updates",
     "download_url": "https://webshare.techbg.net/"
 }
