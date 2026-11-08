@@ -437,7 +437,17 @@ if (isset($_GET['action']) && $_GET['action'] === 'get_update_source') {
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action']) && $_GET['action'] === 'set_update_source') {
     header('Content-Type: application/json');
-    validateCsrfToken();
+    // U4: the helper is validateCsrf() (the old call was a fatal error), and only admins may switch the update channel
+    if (!validateCsrf()) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'CSRF validation failed']);
+        exit;
+    }
+    if (!isAdmin()) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'Admin only']);
+        exit;
+    }
 
     $useBeta = isset($_POST['use_beta']) && $_POST['use_beta'] === '1';
     $configFile = __DIR__ . '/.update-config.json';

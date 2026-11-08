@@ -93,3 +93,6 @@ src/.upload-guard-curl-open
 
 # UI audit screenshots/metrics: contain real IPs, usernames and file names (public repo)
 docs/assets/
+
+# Brute-force counters (src/auth-guard.php)
+src/.auth-attempts.json

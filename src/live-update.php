@@ -82,6 +82,7 @@ $phpFiles = [
     'upload.php',
     'upload-guard.php',
     'error-page.php',
+    'auth-guard.php',
     'public.php',
     'download.php',
     't.php',
@@ -118,7 +119,8 @@ $otherFiles = [
     'favicon.svg',
     'apple-touch-icon.png',
     'CHANGELOG.md',
-    'version.json'
+    'version.json',
+    'robots.txt'
 ];
 
 $installDir = __DIR__;

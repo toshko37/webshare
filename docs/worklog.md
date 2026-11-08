@@ -137,3 +137,57 @@
 
 - Релийз 3.7.0 чрез `release.sh`, след ръчните проверки.
 - Останалите точки от [audit-2026-11-08.md](audit-2026-11-08.md).
+
+## 2026-11-08 · Release 3.7.0
+- Commit 28d3c1f with the code, `docs/` and `tests/`. Commit b1470ce with the version bump from `release.sh`. GitHub release: v3.7.0.
+- `docs/assets/` is not in git, because the screenshots show real IP addresses, users and files and the repository is public.
+- Not committed: `ses1` and `src/smtp-mailer.php.bak-*`. These are local leftovers.
+
+## 2026-11-08 · Сигурност: U2–U11
+
+План и статус в [security-hardening.md](security-hardening.md). Решения D-013 до D-016.
+
+**Код**
+- Нов файл `src/auth-guard.php` с `ws_safe_redirect`, броячи за опитите и реда за fail2ban. Добавен е в `$phpFiles` на live update.
+- `src/login.php`: U2 и ред за fail2ban при грешка и при блокировка.
+- `src/api-upload.php`: U3.
+- `src/index.php`: U4.
+- `src/f.php` и `src/public.php`: U7. Грешката за паролата на папка е на български.
+- `src/.htaccess` и `src/htaccess.txt` (еднакви): U5 и U11 с `X-Robots-Tag`.
+- Нов `src/robots.txt`. Добавен е в `$otherFiles` на live update и в шаблоните на `do-update.php`.
+- В `.gitignore` е добавен `src/.auth-attempts.json`.
+- `tools/webshare-backup.sh`.
+
+**Намеси по сървъра**
+- `src/smtp-mailer.php.bak-20260930-181854` е преместен в `backups/`.
+- fail2ban:
+  - нов филтър `/etc/fail2ban/filter.d/webshare.conf`;
+  - в `jail.local` `[webshare]` има нов `logpath` към PHP лога и `maxretry` 10;
+  - старите конфигурации са в `*.bak-20261108`;
+  - jail-ът е презареден.
+- `/etc/logrotate.d/webshare-php` и `/etc/logrotate.d/webshare-backup`.
+- Права:
+  - 600 на всички JSON с данни, на `.htpasswd` и на `src/.users.json`, `.login-attempts.json`, `.audit.*.json`, `.upload-guard-state.json` и `.auth-attempts.json`;
+  - `.config.json` остава 640;
+  - `/var/www/webshare` е 750.
+- Инсталиран е `rsync` (apt). Скриптът е в `/usr/local/sbin/webshare-backup.sh`, а cron е в `/etc/cron.d/webshare-backup` (03:30). Първият snapshot е направен: 16 GB, 19 s. Вторият е 68 KB.
+
+**Тестове**
+- `php tests/security-unit.php`: 26/26.
+- `tests/security-test.sh https://webshare.techbg.net`: 36/36. Тестът създава и маха временен API ключ, временно споделяне и тестов криптиран файл.
+- Регресия:
+  - `tests/upload-guard-unit.php`: 46/46;
+  - `tests/upload-guard-test.sh`: 18/18.
+- PHP логът след тестовете съдържа само очакваните редове „auth failure“ и е изчистен.
+- Броячите на Upload Guard за 192.168.22.1 са нулирани, а тестовият пропуск е отменен.
+
+**Не е тествано**
+- Истински бан от fail2ban: LAN адресът е в `ignoreip`. Филтърът е проверен с `fail2ban-regex` върху реален ред.
+- Пренасочване след вход с жива сесия. Покрито е от unit теста на `ws_safe_redirect`.
+- U4 с жив админ и с неадмин потребител. Проверено е само, че анонимна заявка не стига до обработчика.
+
+**Отворено**
+- Отделен потребител за FPM пула (D-015).
+- fail2ban, правата и архивът в инсталатора за другите инсталации.
+
+**Уточнение от собственика.** VM-ът се архивира от Proxmox, затова второ копие на архива не е нужно (D-016 е обновено). Този сървър е едновременно работно копие и източник на beta канала. Стабилната версия се публикува в GitHub.

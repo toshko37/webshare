@@ -156,11 +156,12 @@ if (move_uploaded_file($file['tmp_name'], $targetPath)) {
     // Encrypt if requested
     if ($encrypt) {
         require_once __DIR__ . '/encryption.php';
-        $encryptResult = encryptFile($targetPath, $encryptPassword);
+        // encryptFile(source, dest, password) writes dest + '.enc'; the plain file is removed afterwards (U3)
+        $encryptResult = encryptFile($targetPath, $targetPath, $encryptPassword);
         if ($encryptResult['success']) {
-            // Update filename to encrypted version
-            $finalName = $encryptResult['filename'];
-            $targetPath = $uploadDir . $finalName;
+            @unlink($targetPath);
+            $finalName = $encryptResult['encrypted_filename'];
+            $targetPath = $encryptResult['encrypted_path'];
             $encrypted = true;
 
             // Store encryption key for later decryption

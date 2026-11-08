@@ -1,0 +1,4 @@
+# WebShare is a private file-sharing service: nothing here is meant for search engines.
+# Pages also send "X-Robots-Tag: noindex" (see .htaccess).
+User-agent: *
+Disallow: /

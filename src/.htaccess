@@ -93,6 +93,11 @@ RewriteRule ^get-update-script$ get-update-script.php [QSA,L]
     Header set X-XSS-Protection "1; mode=block"
 </IfModule>
 
+# U11: keep share links, upload and chat pages out of search engines
+<IfModule mod_headers.c>
+    Header always set X-Robots-Tag "noindex, nofollow"
+</IfModule>
+
 # Disable directory browsing
 Options -Indexes
 
@@ -102,6 +107,12 @@ Options -Indexes
 </FilesMatch>
 
 <FilesMatch "\.(sh|bash)$">
+    Require all denied
+</FilesMatch>
+
+# U5: documentation, backups, editor leftovers and data files are not public.
+# CHANGELOG.md stays public: the dev live-update channel downloads it.
+<FilesMatch "(?i)(^(?!CHANGELOG\.md$).*\.md$|\.(bak|old|orig|save|swp|swo|tmp|log|sql|dist|mmdb)$|\.bak-|~$)">
     Require all denied
 </FilesMatch>
 

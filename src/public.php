@@ -8,6 +8,7 @@ require_once __DIR__ . '/audit-log.php';
 require_once __DIR__ . '/encryption.php';
 require_once __DIR__ . '/folder-management.php';
 require_once __DIR__ . '/error-page.php';
+require_once __DIR__ . '/auth-guard.php';
 
 $tokensFile = __DIR__ . '/.tokens.json';
 $filesDir = __DIR__ . '/files/';
@@ -74,11 +75,21 @@ if ($isEncrypted) {
         exit;
     }
 
+    // U7: 10 wrong passwords per IP in 15 minutes
+    $wait = ws_attempts_blocked('file-password', 10, 900);
+    if ($wait > 0) {
+        ws_log_auth_failure('file-password-locked');
+        showPublicDecryptionForm($filename, $token, 'Too many wrong passwords. Try again in ' . ceil($wait / 60) . ' min.');
+        exit;
+    }
+
     // Verify password first
     if (!verifyEncryptionPassword($filename, $password)) {
+        ws_attempt_failed('file-password', 900);
         showPublicDecryptionForm($filename, $token, 'Invalid password');
         exit;
     }
+    ws_attempt_clear('file-password');
 
     // Decrypt the file
     $decryptResult = decryptFile($filePath, $password);

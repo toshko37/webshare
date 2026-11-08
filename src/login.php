@@ -16,6 +16,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 define('USERS_FILE', __DIR__ . '/.users.json');
 define('SESSIONS_DIR', __DIR__ . '/.sessions/');
+require_once __DIR__ . '/auth-guard.php';
 define('LOGIN_ATTEMPTS_FILE', __DIR__ . '/.login-attempts.json');
 define('MAX_LOGIN_ATTEMPTS', 5);
 define('LOCKOUT_SECONDS', 900); // 15 min
@@ -139,13 +140,13 @@ function tryRememberMe() {
 
 // Already logged in?
 if (isset($_SESSION['username']) && file_exists(SESSIONS_DIR . session_id() . '.json')) {
-    header('Location: ' . ($_GET['redirect'] ?? '/'));
+    header('Location: ' . ws_safe_redirect($_GET['redirect'] ?? '/'));
     exit;
 }
 
 // Remember-me auto-login
 if (!isset($_SESSION['username']) && tryRememberMe()) {
-    header('Location: ' . ($_GET['redirect'] ?? '/'));
+    header('Location: ' . ws_safe_redirect($_GET['redirect'] ?? '/'));
     exit;
 }
 
@@ -158,6 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $rememberMe = isset($_POST['remember_me']);
 
     if (!checkRateLimit($ip)) {
+        ws_log_auth_failure('login-locked', $ip); // fail2ban: still hammering while locked out
         $mins = ceil(getLockoutRemaining($ip) / 60);
         $error = "Твърде много неуспешни опити. Изчакайте $mins мин.";
     } elseif (empty($username) || empty($password)) {
@@ -169,12 +171,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             createSession($username, $rememberMe, $ip, $_SERVER['HTTP_USER_AGENT'] ?? '');
             require_once __DIR__ . '/audit-log.php';
             writeAuditLog('login', "User logged in from $ip");
-            $dest = $_GET['redirect'] ?? '/';
+            $dest = ws_safe_redirect($_GET['redirect'] ?? '/');
             if ($dest === '/') $dest = '/?_login=1';
             header('Location: ' . $dest);
             exit;
         } else {
             recordFailedAttempt($ip);
+            ws_log_auth_failure('login', $ip);
             $error = 'Невалидно потребителско име или парола.';
         }
     }

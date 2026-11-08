@@ -14,6 +14,7 @@ define('SITE_CONFIG_FILE', __DIR__ . '/.config.json');
 // Include audit log system
 require_once __DIR__ . '/audit-log.php';
 require_once __DIR__ . '/error-page.php';
+require_once __DIR__ . '/auth-guard.php';
 
 // Load site config
 function loadSiteConfig() {
@@ -211,11 +212,18 @@ if ($needsPassword) {
     if (isset($_SESSION[$sessionKey]) && $_SESSION[$sessionKey] === true) {
         $isAuthenticated = true;
     } elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['password'])) {
-        if (password_verify($_POST['password'], $share['password'])) {
+        // U7: 10 wrong passwords per IP in 15 minutes, across all folder shares
+        $wait = ws_attempts_blocked('share-password', 10, 900);
+        if ($wait > 0) {
+            ws_log_auth_failure('share-password-locked');
+            $passwordError = 'Твърде много грешни опити. Опитай пак след ' . ceil($wait / 60) . ' мин.';
+        } elseif (password_verify($_POST['password'], $share['password'])) {
+            ws_attempt_clear('share-password');
             $_SESSION[$sessionKey] = true;
             $isAuthenticated = true;
         } else {
-            $passwordError = 'Incorrect password';
+            ws_attempt_failed('share-password', 900);
+            $passwordError = 'Грешна парола';
         }
     }
 } else {
