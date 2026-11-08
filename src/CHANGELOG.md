@@ -2,6 +2,26 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.8.1] - 2026-11-09
+
+### Upload Guard
+- **Trusted networks (F9).** A new setting in Settings → Upload Protection lets you list trusted IPs or CIDRs, for example a LAN that reaches WebShare through one NAT address.
+  - Addresses from trusted networks skip the "passes per IP per hour" limit and the failed-check lockout.
+  - The robot check and all other limits still apply to them.
+
+### Reliability
+- **No more lost updates (I4).** When two requests changed the same data at the same time, one of the changes could be lost. Changes are now made under a file lock. This covers:
+  - the audit log;
+  - file metadata;
+  - users;
+  - API key checks;
+  - share links and folder shares;
+  - chat and text messages;
+  - encryption metadata.
+- **Measured result.** Before the fix, 8 parallel writers kept only 64 of 400 changes. After the fix, all 400 are kept.
+- **Corrupted JSON files are preserved.** A file that cannot be read is kept as a `.corrupt-<date>` copy instead of being replaced with an empty list.
+- **New file: `src/json-store.php`.** It is delivered by live update and the installers.
+
 ## [3.8.0] - 2026-11-08
 
 ### Important: updates come only from GitHub
@@ -803,6 +823,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.8.1  | 2026-11-09 | Upload Guard trusted networks, locked JSON storage |
 |  3.8.0  | 2026-11-08 | Encryption v2, hashed API keys, link expiry, CSP, installer hardening; GitHub-only updates |
 |  3.7.1  | 2026-11-08 | Security hardening: open redirect, API encryption, brute-force limits, fail2ban, robots |
 |  3.7.0  | 2026-11-08 | Upload Guard for anonymous uploads, UI/UX accessibility and mobile overhaul |

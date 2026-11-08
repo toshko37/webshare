@@ -1,6 +1,6 @@
 {
-    "version": "3.8.0",
-    "released": "2026-11-08",
-    "changelog": "Encryption v2, hashed API keys, link expiry, CSP, installer hardening; GitHub-only updates",
+    "version": "3.8.1",
+    "released": "2026-11-09",
+    "changelog": "Upload Guard trusted networks, locked JSON storage",
     "download_url": "https://webshare.techbg.net/"
 }
