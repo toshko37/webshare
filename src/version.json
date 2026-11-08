@@ -1,6 +1,6 @@
 {
-    "version": "3.6.20",
-    "released": "2026-09-27",
-    "changelog": "Free disk space indicator in header",
+    "version": "3.7.0",
+    "released": "2026-11-08",
+    "changelog": "Upload Guard for anonymous uploads, UI/UX accessibility and mobile overhaul",
     "download_url": "https://webshare.techbg.net/"
 }

@@ -2,6 +2,41 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.7.0] - 2026-11-08
+
+### Upload Guard: protection for anonymous uploads (/u)
+- **"Not a robot" check before the first upload.** Uses an invisible proof-of-work (ALTCHA-compatible) by default, with Cloudflare Turnstile as an option.
+- **Upload pass after verification.** Stored in a cookie and valid for 24 h by default, with limits on files and MB per pass and on maximum file size.
+- **Limits.** Passes per IP per hour, a daily total cap and a minimum free-disk floor.
+- **curl support.** Clients send the 8-character pass code in the `X-Upload-Pass` header. Code-less curl/wget can be enabled as an option.
+- **Admin panel: Settings → Upload Protection.** Choose the mode (open / verified / login only), set the limits and view or revoke passes.
+- **Apache pre-filter.** Unverified requests are rejected before PHP reads the upload body.
+- **Dangerous file types are blocked** (php, phtml, htaccess…), and the owner gets an optional email notification.
+
+### UI/UX
+- **Mobile layout for the main page.** The file table becomes cards, tabs scroll horizontally, and nothing overflows at 390 px.
+- **Accessibility (WCAG 2.1 AA).**
+  - New button palette that meets contrast requirements.
+  - Labels for all fields and names for icon-only buttons.
+  - Landmarks and a skip link.
+  - Keyboard navigation between tabs.
+  - Result: axe violations dropped from 2040 to 0.
+- **Toasts and dialogs** replace all 49 `alert`/`confirm` prompts.
+- **Confirmations.**
+  - Bulk delete asks for confirmation before deleting.
+  - Deleting a user shows how many files will be lost.
+  - Admins can no longer delete their own account.
+- **Unified date format.** All dates use `dd.mm.yyyy HH:MM`.
+- **Styled error pages** replace bare text for invalid share links.
+- **Public pages (upload, chat) are fully in Bulgarian.**
+- **Fixed settings toggles.** Geo Blocking, Open Chat and Email now render correctly.
+- **Sessions tab.** Dead sessions are cleaned up automatically, devices are shown in readable form and the page no longer jumps while loading.
+
+### Fixes
+- **`.config.json` write errors are now shown** in the admin panel instead of failing silently.
+- **`.htaccess` php_value guard** now checks `mod_php.c` / `mod_php7.c`.
+- **Updates now ship `.js` and `.css` files.** Both live-update and the tarball update include them.
+
 ## [3.6.20] - 2026-09-27
 
 ### UI
@@ -716,6 +751,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.7.0  | 2026-11-08 | Upload Guard for anonymous uploads, UI/UX accessibility and mobile overhaul |
 |  3.6.20  | 2026-09-27 | Free disk space indicator in header |
 |  3.6.19  | 2026-09-27 | File selection checkboxes & bulk delete |
 |  3.6.18  | 2026-06-29 | Fix delete in Public folder & curl upload responses |
