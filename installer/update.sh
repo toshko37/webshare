@@ -2,13 +2,11 @@
 #
 # WebShare Update Script v3.2
 # ===========================
-# Downloads updates from GitHub (stable) or dev server
+# Downloads updates from GitHub (the only source since 3.8.0)
 # Supports both old (root) and new (src/) directory structures
 #
 # Usage:
-#   ./update.sh                    # Use configured source
-#   ./update.sh --source github    # Force GitHub source
-#   ./update.sh --source dev       # Force dev server source
+#   ./update.sh                    # Update from GitHub
 #   ./update.sh -y                 # Auto-confirm
 #
 
@@ -53,9 +51,7 @@ detect_install_dir() {
 detect_install_dir
 
 BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
-CONFIG_FILE="$INSTALL_DIR/.update-config.json"
 AUTO_CONFIRM=false
-SOURCE_OVERRIDE=""
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -65,7 +61,7 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --source)
-            SOURCE_OVERRIDE="$2"
+            echo "Note: --source is no longer used; updates come from GitHub only" >&2
             shift 2
             ;;
         *)
@@ -74,33 +70,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Load config to determine source
-if [ -f "$CONFIG_FILE" ]; then
-    USE_STABLE=$(grep -o '"stable"[[:space:]]*:[[:space:]]*\(true\|false\)' "$CONFIG_FILE" | grep -o '\(true\|false\)' || echo "true")
-else
-    USE_STABLE="true"
-fi
-
-# Override if specified
-if [ -n "$SOURCE_OVERRIDE" ]; then
-    if [ "$SOURCE_OVERRIDE" = "github" ]; then
-        USE_STABLE="true"
-    elif [ "$SOURCE_OVERRIDE" = "dev" ]; then
-        USE_STABLE="false"
-    else
-        echo -e "${RED}Error: Invalid source '$SOURCE_OVERRIDE'. Use 'github' or 'dev'${NC}"
-        exit 1
-    fi
-fi
-
-# Set source URL based on config
-if [ "$USE_STABLE" = "true" ]; then
-    SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/src"
-    SOURCE_NAME="GitHub (stable)"
-else
-    SOURCE_URL="https://webshare.techbg.net"
-    SOURCE_NAME="Dev server"
-fi
+# Source: GitHub only (the dev/beta channel was removed, docs/decisions.md D-023)
+SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/src"
+SOURCE_NAME="GitHub (stable)"
 
 # Banner
 echo ""
@@ -124,13 +96,8 @@ echo ""
 
 # Check for new version
 echo -n "Checking for updates... "
-if [ "$USE_STABLE" = "true" ]; then
-    LATEST_INFO=$(curl -fsSL "https://api.github.com/repos/toshko37/webshare/releases/latest" 2>/dev/null || echo "{}")
-    LATEST_VERSION=$(echo "$LATEST_INFO" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"v\?\([^"]*\)".*/\1/' || echo "")
-else
-    VERSION_INFO=$(curl -fsSL "$SOURCE_URL/version.json" 2>/dev/null || echo "{}")
-    LATEST_VERSION=$(echo "$VERSION_INFO" | grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"\([^"]*\)".*/\1/' || echo "")
-fi
+LATEST_INFO=$(curl -fsSL "https://api.github.com/repos/toshko37/webshare/releases/latest" 2>/dev/null || echo "{}")
+LATEST_VERSION=$(echo "$LATEST_INFO" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"v\?\([^"]*\)".*/\1/' || echo "")
 
 if [ -n "$LATEST_VERSION" ]; then
     echo -e "${GREEN}$LATEST_VERSION${NC}"
@@ -180,7 +147,6 @@ cp "$INSTALL_DIR"/.htpasswd "$BACKUP_DIR"/ 2>/dev/null || true
 cp "$INSTALL_DIR"/.user.ini "$BACKUP_DIR"/ 2>/dev/null || true
 cp "$INSTALL_DIR"/.config.json "$BACKUP_DIR"/ 2>/dev/null || true
 cp "$INSTALL_DIR"/.geo.json "$BACKUP_DIR"/ 2>/dev/null || true
-cp "$INSTALL_DIR"/.update-config.json "$BACKUP_DIR"/ 2>/dev/null || true
 
 echo -e "${GREEN}Backup created: $BACKUP_DIR${NC}"
 
@@ -227,7 +193,6 @@ SYMLINKS=(
     ".api-keys.json:../.api-keys.json"
     ".encryption-keys.json:../.encryption-keys.json"
     ".mail-ratelimit.json:../.mail-ratelimit.json"
-    ".update-config.json:../.update-config.json"
     ".version-check.json:../.version-check.json"
     "GeoLite2-Country.mmdb:../GeoLite2-Country.mmdb"
 )
@@ -288,21 +253,70 @@ fi
 echo ""
 echo -e "${BLUE}[5/7] Downloading PHP files...${NC}"
 
-PHP_FILES=(
-    "index.php" "upload.php" "public.php" "download.php"
-    "t.php" "text.php" "share.php" "folder-management.php"
-    "encryption.php" "audit-log.php" "geo-check.php"
-    "user-management.php" "html-sanitizer.php" "smtp-mailer.php"
-    "send-mail.php" "web-download.php" "api-upload.php"
-    "api-scripts.php" "check-version.php" "do-update.php"
-    "live-update.php" "p.php" "u.php" "f.php" "get.php"
-    "get-speedtest.php" "get-update.php" "get-update-script.php"
-    "security-headers.php"
-)
+# File list: src/manifest.txt is the single source of truth (also used by
+# live-update.php's lists, checked by tests/manifest-test.sh). The embedded
+# list is only a fallback for sources that do not publish the manifest yet.
+PHP_FILES=()
+if MANIFEST_TXT=$(curl -fsSL "$SOURCE_URL/manifest.txt" 2>/dev/null); then
+    while IFS= read -r mf; do
+        mf="${mf%$'\r'}"
+        case "$mf" in ''|'#'*|*..*|/*) ;; *) PHP_FILES+=("$mf") ;; esac
+    done <<< "$MANIFEST_TXT"
+fi
+if [ ${#PHP_FILES[@]} -eq 0 ]; then
+    PHP_FILES=(
+        "security-check.php"
+        "login.php"
+        "logout.php"
+        "index.php"
+        "upload.php"
+        "upload-guard.php"
+        "error-page.php"
+        "auth-guard.php"
+        "public.php"
+        "download.php"
+        "t.php"
+        "text.php"
+        "share.php"
+        "folder-management.php"
+        "encryption.php"
+        "audit-log.php"
+        "geo-check.php"
+        "user-management.php"
+        "html-sanitizer.php"
+        "smtp-mailer.php"
+        "send-mail.php"
+        "web-download.php"
+        "api-upload.php"
+        "api-scripts.php"
+        "check-version.php"
+        "do-update.php"
+        "live-update.php"
+        "p.php"
+        "u.php"
+        "f.php"
+        "get.php"
+        "get-speedtest.php"
+        "get-update.php"
+        "get-update-script.php"
+        "security-headers.php"
+        "ui-kit.css"
+        "ui-kit.js"
+        "favicon.ico"
+        "favicon.svg"
+        "apple-touch-icon.png"
+        "CHANGELOG.md"
+        "version.json"
+        "robots.txt"
+        "assets/quill/quill.js"
+        "assets/quill/quill.snow.css"
+    )
+fi
 
 cd "$SRC_DIR"
 
 for file in "${PHP_FILES[@]}"; do
+    mkdir -p "$(dirname "$SRC_DIR/$file")"
     echo -n "  $file... "
     if curl -fsSL "$SOURCE_URL/$file" -o "$file.new" 2>/dev/null; then
         # Verify it's valid PHP
@@ -335,17 +349,10 @@ for file in "favicon.ico" "favicon.svg" "apple-touch-icon.png"; do
     fi
 done
 
-# .htaccess (GitHub: .htaccess, Dev: htaccess.txt)
+# .htaccess
 echo -n "  .htaccess... "
 HTACCESS_URL="$SOURCE_URL/.htaccess"
-if [ "$USE_STABLE" != "true" ]; then
-    HTACCESS_URL="$SOURCE_URL/htaccess.txt"
-fi
 if curl -fsSL "$HTACCESS_URL" -o ".htaccess.new" 2>/dev/null; then
-    # Update AuthUserFile path if using dev server version
-    if [ "$USE_STABLE" != "true" ]; then
-        sed -i "s|__HTPASSWD_PATH__|$INSTALL_DIR/.htpasswd|g" ".htaccess.new"
-    fi
     mv ".htaccess.new" ".htaccess"
     echo -e "${GREEN}OK${NC}"
 else
@@ -353,12 +360,9 @@ else
     rm -f ".htaccess.new"
 fi
 
-# .user.ini (GitHub: .user.ini, Dev: user.ini.txt)
+# .user.ini (tracked in git as user.ini.txt)
 echo -n "  .user.ini... "
-USERINI_URL="$SOURCE_URL/.user.ini"
-if [ "$USE_STABLE" != "true" ]; then
-    USERINI_URL="$SOURCE_URL/user.ini.txt"
-fi
+USERINI_URL="$SOURCE_URL/user.ini.txt"
 if curl -fsSL "$USERINI_URL" -o ".user.ini.new" 2>/dev/null; then
     mv ".user.ini.new" ".user.ini"
     echo -e "${GREEN}OK${NC}"
@@ -452,6 +456,18 @@ chown -R www-data:www-data "$INSTALL_DIR/texts" 2>/dev/null || true
 chmod +x "$INSTALL_DIR/installer"/*.sh 2>/dev/null || true
 
 echo -e "${GREEN}Permissions set${NC}"
+
+# Server hardening: data file permissions, fail2ban jail, log rotation, daily backup.
+# Idempotent; existing jail/backup settings are left alone. Always from GitHub (stable).
+HARDEN_BASE="https://raw.githubusercontent.com/toshko37/webshare/main"
+mkdir -p "$INSTALL_DIR/installer" "$INSTALL_DIR/tools"
+curl -fsSL "$HARDEN_BASE/installer/harden.sh" -o "$INSTALL_DIR/installer/harden.sh" 2>/dev/null && chmod 755 "$INSTALL_DIR/installer/harden.sh"
+curl -fsSL "$HARDEN_BASE/tools/webshare-backup.sh" -o "$INSTALL_DIR/tools/webshare-backup.sh" 2>/dev/null && chmod 755 "$INSTALL_DIR/tools/webshare-backup.sh"
+if [ -x "$INSTALL_DIR/installer/harden.sh" ]; then
+    bash "$INSTALL_DIR/installer/harden.sh" "$INSTALL_DIR" || true
+else
+    echo "  harden.sh not available, hardening skipped"
+fi
 
 # Verify
 echo ""

@@ -15,11 +15,12 @@ require_once __DIR__ . '/user-management.php';
 require_once __DIR__ . '/audit-log.php';
 
 // Get API key from header or query parameter
-$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? $_GET['key'] ?? $_POST['key'] ?? null;
+// I11: not accepted in the URL any more (it ends up in access logs and browser history)
+$apiKey = $_SERVER['HTTP_X_API_KEY'] ?? $_POST['key'] ?? null;
 
 if (!$apiKey) {
     http_response_code(401);
-    echo json_encode(['success' => false, 'error' => 'API key required. Use X-API-Key header or key parameter.']);
+    echo json_encode(['success' => false, 'error' => 'API key required. Use the X-API-Key header (or a POST field named key).']);
     exit;
 }
 
@@ -165,7 +166,7 @@ if (move_uploaded_file($file['tmp_name'], $targetPath)) {
             $encrypted = true;
 
             // Store encryption key for later decryption
-            storeEncryptionPassword($finalName, $encryptPassword, $user);
+            storeEncryptionPassword($finalName, $encryptPassword, $user, $folder ?: $user);
         } else {
             // Encryption failed, but file is uploaded
             writeAuditLog('api_upload_error', "Encryption failed for $finalName: " . ($encryptResult['error'] ?? 'unknown') . " [key: $apiKeyName ($apiKeyId)]", $user);

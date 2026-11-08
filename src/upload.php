@@ -258,7 +258,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'])) {
 
                     // Store encryption password for recovery
                     $uploaderName = $targetFolder === '_public' ? 'public' : $targetFolder;
-                    storeEncryptionPassword($finalFilename, $encryptPassword, $uploaderName);
+                    storeEncryptionPassword($finalFilename, $encryptPassword, $uploaderName, $targetFolder);
                 }
                 // If encryption fails, keep the original unencrypted file
             }

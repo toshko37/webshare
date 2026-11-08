@@ -92,20 +92,9 @@ webshare/
 - [Security Audit](src/SECURITY-AUDIT.md)
 - [Документация (BG)](src/README-BG.md)
 
-## Update Sources
+## Updates
 
-WebShare supports two update sources:
-
-| Source | URL | Description |
-|--------|-----|-------------|
-| **GitHub** (default) | `github.com/toshko37/webshare` | Stable releases |
-| **Dev Server** | `webshare.techbg.net` | Beta/testing |
-
-Configure in `.update-config.json`:
-```json
-{"stable": true}   // GitHub (recommended)
-{"stable": false}  // Dev server
-```
+WebShare is installed and updated only from GitHub (`github.com/toshko37/webshare`, latest release on `main`): the installers, `installer/update.sh`, and the one-click Live Update in the admin panel all use it. The former beta channel was removed in 3.8.0.
 
 ## License
 

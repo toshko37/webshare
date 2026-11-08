@@ -8,10 +8,8 @@
 #
 # Usage:
 #   sudo ./install.sh domain.com [username] [password]
-#   sudo ./install.sh --source dev domain.com
 #
 # Options:
-#   --source github|dev  - Choose update source (default: github)
 #   --force              - Skip existing installation check
 #
 
@@ -39,7 +37,6 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Default values
-SOURCE="github"
 FORCE=false
 DOMAIN=""
 AUTH_USER="admin"
@@ -49,7 +46,7 @@ AUTH_PASS=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         --source)
-            SOURCE="$2"
+            echo "Note: --source is no longer used; WebShare is installed and updated from GitHub only" >&2
             shift 2
             ;;
         --force)
@@ -72,10 +69,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate source
-if [ "$SOURCE" != "github" ] && [ "$SOURCE" != "dev" ]; then
-    error "Invalid source: $SOURCE. Use 'github' or 'dev'"
-fi
 
 # Banner
 echo ""
@@ -83,7 +76,7 @@ echo -e "${CYAN}╦ ╦┌─┐┌┐ ╔═╗┬ ┬┌─┐┬─┐┌─�
 echo -e "${CYAN}║║║├┤ ├┴┐╚═╗├─┤├─┤├┬┘├┤ ${NC}"
 echo -e "${CYAN}╚╩╝└─┘└─┘╚═╝┴ ┴┴ ┴┴└─└─┘${NC}"
 echo ""
-echo -e "${BLUE}Installer v3.2${NC} - Source: ${GREEN}$SOURCE${NC}"
+echo -e "${BLUE}Installer v3.2${NC} - Source: ${GREEN}GitHub${NC}"
 echo ""
 
 # Check domain
@@ -92,13 +85,11 @@ if [ -z "$DOMAIN" ]; then
     echo "  sudo ./install.sh <domain> [username] [password]"
     echo ""
     echo "Options:"
-    echo "  --source github|dev  - Update source (default: github)"
     echo "  --force              - Skip existing installation check"
     echo ""
     echo "Examples:"
     echo "  sudo ./install.sh webshare.example.com"
     echo "  sudo ./install.sh webshare.example.com admin mypass123"
-    echo "  sudo ./install.sh --source dev webshare.example.com"
     echo ""
     error "Domain is required!"
 fi
@@ -339,7 +330,7 @@ info "Domain: $DOMAIN"
 info "Install dir: $INSTALL_DIR"
 info "Source dir: $SRC_DIR"
 info "Admin user: $AUTH_USER"
-info "Update source: $SOURCE"
+info "Update source: GitHub"
 echo ""
 
 # ============================================
@@ -436,28 +427,70 @@ success "Directories created"
 # ============================================
 info "Installing source files..."
 
-# Determine source URL
-if [ "$SOURCE" = "github" ]; then
-    SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/src"
-    INSTALLER_URL="https://raw.githubusercontent.com/toshko37/webshare/main/installer"
-else
-    SOURCE_URL="https://webshare.techbg.net"
-    INSTALLER_URL="https://webshare.techbg.net/installer"
-fi
+# Source: GitHub only (the dev/beta channel was removed, docs/decisions.md D-023)
+SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/src"
+INSTALLER_URL="https://raw.githubusercontent.com/toshko37/webshare/main/installer"
 
 # List of files to download
-PHP_FILES=(
-    "security-check.php" "login.php" "logout.php"
-    "index.php" "upload.php" "public.php" "download.php"
-    "t.php" "text.php" "share.php" "folder-management.php"
-    "encryption.php" "audit-log.php" "geo-check.php"
-    "user-management.php" "html-sanitizer.php" "smtp-mailer.php"
-    "send-mail.php" "web-download.php" "api-upload.php"
-    "api-scripts.php" "check-version.php" "do-update.php"
-    "live-update.php" "p.php" "u.php" "f.php" "get.php"
-    "get-speedtest.php" "get-update.php" "get-update-script.php"
-    "security-headers.php"
-)
+# File list: src/manifest.txt is the single source of truth (also used by
+# live-update.php's lists, checked by tests/manifest-test.sh). The embedded
+# list is only a fallback for sources that do not publish the manifest yet.
+PHP_FILES=()
+if MANIFEST_TXT=$(curl -fsSL "$SOURCE_URL/manifest.txt" 2>/dev/null); then
+    while IFS= read -r mf; do
+        mf="${mf%$'\r'}"
+        case "$mf" in ''|'#'*|*..*|/*) ;; *) PHP_FILES+=("$mf") ;; esac
+    done <<< "$MANIFEST_TXT"
+fi
+if [ ${#PHP_FILES[@]} -eq 0 ]; then
+    PHP_FILES=(
+        "security-check.php"
+        "login.php"
+        "logout.php"
+        "index.php"
+        "upload.php"
+        "upload-guard.php"
+        "error-page.php"
+        "auth-guard.php"
+        "public.php"
+        "download.php"
+        "t.php"
+        "text.php"
+        "share.php"
+        "folder-management.php"
+        "encryption.php"
+        "audit-log.php"
+        "geo-check.php"
+        "user-management.php"
+        "html-sanitizer.php"
+        "smtp-mailer.php"
+        "send-mail.php"
+        "web-download.php"
+        "api-upload.php"
+        "api-scripts.php"
+        "check-version.php"
+        "do-update.php"
+        "live-update.php"
+        "p.php"
+        "u.php"
+        "f.php"
+        "get.php"
+        "get-speedtest.php"
+        "get-update.php"
+        "get-update-script.php"
+        "security-headers.php"
+        "ui-kit.css"
+        "ui-kit.js"
+        "favicon.ico"
+        "favicon.svg"
+        "apple-touch-icon.png"
+        "CHANGELOG.md"
+        "version.json"
+        "robots.txt"
+        "assets/quill/quill.js"
+        "assets/quill/quill.snow.css"
+    )
+fi
 
 OTHER_FILES=(
     "favicon.ico" "favicon.svg" "apple-touch-icon.png"
@@ -466,6 +499,7 @@ OTHER_FILES=(
 
 # Download PHP files to src/
 for file in "${PHP_FILES[@]}"; do
+    mkdir -p "$(dirname "$SRC_DIR/$file")"
     echo -n "  $file... "
     if curl -fsSL "$SOURCE_URL/$file" -o "$SRC_DIR/$file" 2>/dev/null; then
         echo -e "${GREEN}OK${NC}"
@@ -484,26 +518,18 @@ for file in "${OTHER_FILES[@]}"; do
     fi
 done
 
-# Download .htaccess to src/ (GitHub: .htaccess, Dev: htaccess.txt)
+# Download .htaccess to src/
 echo -n "  .htaccess... "
-if [ "$SOURCE" = "github" ]; then
-    HTACCESS_URL="$SOURCE_URL/.htaccess"
-else
-    HTACCESS_URL="$SOURCE_URL/htaccess.txt"
-fi
+HTACCESS_URL="$SOURCE_URL/.htaccess"
 if curl -fsSL "$HTACCESS_URL" -o "$SRC_DIR/.htaccess" 2>/dev/null; then
     echo -e "${GREEN}OK${NC}"
 else
     echo -e "${YELLOW}skipped${NC}"
 fi
 
-# Download .user.ini to src/ (GitHub: .user.ini, Dev: user.ini.txt)
+# Download .user.ini to src/ (tracked in git as user.ini.txt)
 echo -n "  .user.ini... "
-if [ "$SOURCE" = "github" ]; then
-    USERINI_URL="$SOURCE_URL/.user.ini"
-else
-    USERINI_URL="$SOURCE_URL/user.ini.txt"
-fi
+USERINI_URL="$SOURCE_URL/user.ini.txt"
 if curl -fsSL "$USERINI_URL" -o "$SRC_DIR/.user.ini" 2>/dev/null; then
     echo -e "${GREEN}OK${NC}"
 else
@@ -569,7 +595,6 @@ cd "$SRC_DIR"
 [ ! -L ".api-keys.json" ] && [ ! -e ".api-keys.json" ] && ln -sf ../.api-keys.json .api-keys.json
 [ ! -L ".encryption-keys.json" ] && [ ! -e ".encryption-keys.json" ] && ln -sf ../.encryption-keys.json .encryption-keys.json
 [ ! -L ".mail-ratelimit.json" ] && [ ! -e ".mail-ratelimit.json" ] && ln -sf ../.mail-ratelimit.json .mail-ratelimit.json
-[ ! -L ".update-config.json" ] && [ ! -e ".update-config.json" ] && ln -sf ../.update-config.json .update-config.json
 [ ! -L ".version-check.json" ] && [ ! -e ".version-check.json" ] && ln -sf ../.version-check.json .version-check.json
 [ ! -L "GeoLite2-Country.mmdb" ] && [ ! -e "GeoLite2-Country.mmdb" ] && ln -sf ../GeoLite2-Country.mmdb GeoLite2-Country.mmdb
 
@@ -594,12 +619,6 @@ if [ ! -f "$INSTALL_DIR/.geo.json" ]; then
 GEOJSON
 fi
 
-# Update config (determines update source)
-cat > "$INSTALL_DIR/.update-config.json" << UPDATECONF
-{
-    "stable": $([ "$SOURCE" = "github" ] && echo "true" || echo "false")
-}
-UPDATECONF
 
 # Create other config files if they don't exist
 [ -f "$INSTALL_DIR/.files-meta.json" ] || echo "{}" > "$INSTALL_DIR/.files-meta.json"
@@ -709,6 +728,20 @@ chmod 644 "$SRC_DIR/.user.ini" 2>/dev/null || true
 chmod +x "$INSTALL_DIR/installer"/*.sh 2>/dev/null || true
 
 success "Permissions set"
+
+# Packages for brute-force protection and backups (group 4, docs/security-hardening.md)
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fail2ban rsync > /dev/null 2>&1 || true
+# Server hardening: data file permissions, fail2ban jail, log rotation, daily backup.
+# Idempotent; existing jail/backup settings are left alone. Always from GitHub (stable).
+HARDEN_BASE="https://raw.githubusercontent.com/toshko37/webshare/main"
+mkdir -p "$INSTALL_DIR/installer" "$INSTALL_DIR/tools"
+curl -fsSL "$HARDEN_BASE/installer/harden.sh" -o "$INSTALL_DIR/installer/harden.sh" 2>/dev/null && chmod 755 "$INSTALL_DIR/installer/harden.sh"
+curl -fsSL "$HARDEN_BASE/tools/webshare-backup.sh" -o "$INSTALL_DIR/tools/webshare-backup.sh" 2>/dev/null && chmod 755 "$INSTALL_DIR/tools/webshare-backup.sh"
+if [ -x "$INSTALL_DIR/installer/harden.sh" ]; then
+    bash "$INSTALL_DIR/installer/harden.sh" "$INSTALL_DIR" || true
+else
+    echo "  harden.sh not available, hardening skipped"
+fi
 
 # ============================================
 # 12. Apache Virtual Host (with src/ as DocumentRoot)
@@ -856,8 +889,7 @@ echo "  Source:  ${INSTALL_DIR}/src/"
 echo "  Files:   ${INSTALL_DIR}/files/"
 echo "  Texts:   ${INSTALL_DIR}/texts/"
 echo ""
-echo -e "Update source: ${BLUE}$SOURCE${NC}"
+echo -e "Update source: ${BLUE}GitHub${NC}"
 echo "To update: ${INSTALL_DIR}/installer/update.sh"
-echo "To change source: ${INSTALL_DIR}/.update-config.json"
 echo ""
 

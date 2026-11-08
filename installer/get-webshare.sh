@@ -9,14 +9,10 @@
 #   curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/get-webshare.sh | sudo bash -s -- domain.com
 #   curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/get-webshare.sh | sudo bash -s -- domain.com admin mypass
 #
-# Usage (from dev server):
-#   curl -fsSL https://webshare.techbg.net/get | sudo bash -s -- --source dev domain.com
-#
 # Custom installation path:
 #   curl -fsSL ... | sudo bash -s -- --path /var/www/mywebshare domain.com admin mypass
 #
 # Options:
-#   --source github|dev   Update source (default: github)
 #   --path /path/to/dir   Installation directory (default: current directory)
 #
 
@@ -55,7 +51,6 @@ if [ ! -f /etc/debian_version ]; then
 fi
 
 # Default values
-SOURCE="github"
 DOMAIN=""
 ADMIN_USER="admin"
 ADMIN_PASS=""
@@ -66,7 +61,7 @@ ARG_INDEX=0
 while [[ $# -gt 0 ]]; do
     case $1 in
         --source)
-            SOURCE="$2"
+            echo "Note: --source is no longer used; WebShare is installed and updated from GitHub only" >&2
             shift 2
             ;;
         --path)
@@ -88,11 +83,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate source
-if [ "$SOURCE" != "github" ] && [ "$SOURCE" != "dev" ]; then
-    echo -e "${RED}Error: Invalid source '$SOURCE'. Use 'github' or 'dev'${NC}"
-    exit 1
-fi
 
 # Interactive prompts if needed
 if [ -z "$DOMAIN" ]; then
@@ -118,17 +108,12 @@ echo ""
 echo -e "${BLUE}Configuration:${NC}"
 echo -e "  Domain: ${GREEN}${DOMAIN}${NC}"
 echo -e "  Admin:  ${GREEN}${ADMIN_USER}${NC}"
-echo -e "  Source: ${GREEN}${SOURCE}${NC}"
+echo -e "  Source: ${GREEN}GitHub${NC}"
 echo ""
 
-# Set source URL
-if [ "$SOURCE" = "github" ]; then
-    SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/src"
-    INSTALLER_URL="https://raw.githubusercontent.com/toshko37/webshare/main/installer"
-else
-    SOURCE_URL="https://webshare.techbg.net"
-    INSTALLER_URL="https://webshare.techbg.net/installer"
-fi
+# Source: GitHub only (the dev/beta channel was removed, docs/decisions.md D-023)
+SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/src"
+INSTALLER_URL="https://raw.githubusercontent.com/toshko37/webshare/main/installer"
 
 # Set installation path (default: current directory)
 WEBROOT="${INSTALL_PATH:-$(pwd)}"
@@ -193,17 +178,65 @@ echo -e "${GREEN}Directories created${NC}"
 # ============================================
 echo -e "${BLUE}[4/8]${NC} Downloading WebShare files..."
 
-PHP_FILES=(
-    "index.php" "upload.php" "public.php" "download.php"
-    "t.php" "text.php" "share.php" "folder-management.php"
-    "encryption.php" "audit-log.php" "geo-check.php"
-    "user-management.php" "html-sanitizer.php" "smtp-mailer.php"
-    "send-mail.php" "web-download.php" "api-upload.php"
-    "api-scripts.php" "check-version.php" "do-update.php"
-    "live-update.php" "p.php" "u.php" "f.php" "get.php"
-    "get-speedtest.php" "get-update.php" "get-update-script.php"
-    "security-headers.php" "security-check.php"
-)
+# File list: src/manifest.txt is the single source of truth (also used by
+# live-update.php's lists, checked by tests/manifest-test.sh). The embedded
+# list is only a fallback for sources that do not publish the manifest yet.
+PHP_FILES=()
+if MANIFEST_TXT=$(curl -fsSL "$SOURCE_URL/manifest.txt" 2>/dev/null); then
+    while IFS= read -r mf; do
+        mf="${mf%$'\r'}"
+        case "$mf" in ''|'#'*|*..*|/*) ;; *) PHP_FILES+=("$mf") ;; esac
+    done <<< "$MANIFEST_TXT"
+fi
+if [ ${#PHP_FILES[@]} -eq 0 ]; then
+    PHP_FILES=(
+        "security-check.php"
+        "login.php"
+        "logout.php"
+        "index.php"
+        "upload.php"
+        "upload-guard.php"
+        "error-page.php"
+        "auth-guard.php"
+        "public.php"
+        "download.php"
+        "t.php"
+        "text.php"
+        "share.php"
+        "folder-management.php"
+        "encryption.php"
+        "audit-log.php"
+        "geo-check.php"
+        "user-management.php"
+        "html-sanitizer.php"
+        "smtp-mailer.php"
+        "send-mail.php"
+        "web-download.php"
+        "api-upload.php"
+        "api-scripts.php"
+        "check-version.php"
+        "do-update.php"
+        "live-update.php"
+        "p.php"
+        "u.php"
+        "f.php"
+        "get.php"
+        "get-speedtest.php"
+        "get-update.php"
+        "get-update-script.php"
+        "security-headers.php"
+        "ui-kit.css"
+        "ui-kit.js"
+        "favicon.ico"
+        "favicon.svg"
+        "apple-touch-icon.png"
+        "CHANGELOG.md"
+        "version.json"
+        "robots.txt"
+        "assets/quill/quill.js"
+        "assets/quill/quill.snow.css"
+    )
+fi
 
 OTHER_FILES=(
     "favicon.ico" "favicon.svg" "apple-touch-icon.png"
@@ -212,6 +245,7 @@ OTHER_FILES=(
 
 # Download PHP files to src/
 for file in "${PHP_FILES[@]}"; do
+    mkdir -p "$(dirname "$SRC_DIR/$file")"
     curl -fsSL "$SOURCE_URL/$file" -o "$SRC_DIR/$file" 2>/dev/null || true
 done
 
@@ -220,19 +254,9 @@ for file in "${OTHER_FILES[@]}"; do
     curl -fsSL "$SOURCE_URL/$file" -o "$SRC_DIR/$file" 2>/dev/null || true
 done
 
-# Download .htaccess to src/ (GitHub: .htaccess, Dev: htaccess.txt)
-if [ "$SOURCE" = "github" ]; then
-    curl -fsSL "$SOURCE_URL/.htaccess" -o "$SRC_DIR/.htaccess" 2>/dev/null || true
-else
-    curl -fsSL "$SOURCE_URL/htaccess.txt" -o "$SRC_DIR/.htaccess" 2>/dev/null || true
-fi
-
-# Download .user.ini to src/ (GitHub: .user.ini, Dev: user.ini.txt)
-if [ "$SOURCE" = "github" ]; then
-    curl -fsSL "$SOURCE_URL/.user.ini" -o "$SRC_DIR/.user.ini" 2>/dev/null
-else
-    curl -fsSL "$SOURCE_URL/user.ini.txt" -o "$SRC_DIR/.user.ini" 2>/dev/null
-fi || {
+# .htaccess is tracked as is; .user.ini is tracked as user.ini.txt
+curl -fsSL "$SOURCE_URL/.htaccess" -o "$SRC_DIR/.htaccess" 2>/dev/null || true
+curl -fsSL "$SOURCE_URL/user.ini.txt" -o "$SRC_DIR/.user.ini" 2>/dev/null || {
     cat > "$SRC_DIR/.user.ini" << 'PHPINI'
 ; WebShare PHP Settings
 upload_max_filesize = 10G
@@ -252,7 +276,7 @@ curl -fsSL "$INSTALLER_URL/update.sh" -o "$WEBROOT/installer/update.sh" 2>/dev/n
 curl -fsSL "$INSTALLER_URL/install.sh" -o "$WEBROOT/installer/install.sh" 2>/dev/null || true
 chmod +x "$WEBROOT/installer"/*.sh 2>/dev/null || true
 
-# Fix .htaccess path (handle both GitHub version and dev version with placeholder)
+# Fix .htaccess path (legacy AuthUserFile line, if present)
 sed -i "s|AuthUserFile .*/\.htpasswd|AuthUserFile $WEBROOT/.htpasswd|g" "$SRC_DIR/.htaccess" 2>/dev/null || true
 sed -i "s|__HTPASSWD_PATH__|$WEBROOT/.htpasswd|g" "$SRC_DIR/.htaccess" 2>/dev/null || true
 
@@ -282,7 +306,6 @@ ln -sf ../.folder-shares.json .folder-shares.json 2>/dev/null || true
 ln -sf ../.api-keys.json .api-keys.json 2>/dev/null || true
 ln -sf ../.encryption-keys.json .encryption-keys.json 2>/dev/null || true
 ln -sf ../.mail-ratelimit.json .mail-ratelimit.json 2>/dev/null || true
-ln -sf ../.update-config.json .update-config.json 2>/dev/null || true
 ln -sf ../.version-check.json .version-check.json 2>/dev/null || true
 ln -sf ../GeoLite2-Country.mmdb GeoLite2-Country.mmdb 2>/dev/null || true
 
@@ -330,12 +353,6 @@ fi
 [ -f "$WEBROOT/.folder-shares.json" ] || echo '{}' > "$WEBROOT/.folder-shares.json"
 [ -f "$WEBROOT/.encryption-keys.json" ] || echo '{}' > "$WEBROOT/.encryption-keys.json"
 
-# Update source config - always update this one
-cat > "$WEBROOT/.update-config.json" << UPDATECONF
-{
-    "stable": $([ "$SOURCE" = "github" ] && echo "true" || echo "false")
-}
-UPDATECONF
 
 echo -e "${GREEN}Symlinks and configuration created${NC}"
 
@@ -352,6 +369,20 @@ chmod 755 "$SRC_DIR"
 chmod 644 "$SRC_DIR"/*.php 2>/dev/null || true
 
 echo -e "${GREEN}Permissions set${NC}"
+
+# Packages for brute-force protection and backups (group 4, docs/security-hardening.md)
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fail2ban rsync > /dev/null 2>&1 || true
+# Server hardening: data file permissions, fail2ban jail, log rotation, daily backup.
+# Idempotent; existing jail/backup settings are left alone. Always from GitHub (stable).
+HARDEN_BASE="https://raw.githubusercontent.com/toshko37/webshare/main"
+mkdir -p "$WEBROOT/installer" "$WEBROOT/tools"
+curl -fsSL "$HARDEN_BASE/installer/harden.sh" -o "$WEBROOT/installer/harden.sh" 2>/dev/null && chmod 755 "$WEBROOT/installer/harden.sh"
+curl -fsSL "$HARDEN_BASE/tools/webshare-backup.sh" -o "$WEBROOT/tools/webshare-backup.sh" 2>/dev/null && chmod 755 "$WEBROOT/tools/webshare-backup.sh"
+if [ -x "$WEBROOT/installer/harden.sh" ]; then
+    bash "$WEBROOT/installer/harden.sh" "$WEBROOT" || true
+else
+    echo "  harden.sh not available, hardening skipped"
+fi
 
 # ============================================
 # 7. Configure virtual host
@@ -437,7 +468,7 @@ echo -e "  ${CYAN}Public Upload:${NC} https://${DOMAIN}/u"
 echo -e "  ${CYAN}Text Share:${NC}    https://${DOMAIN}/t"
 echo ""
 echo -e "  ${CYAN}Admin User:${NC}    ${ADMIN_USER}"
-echo -e "  ${CYAN}Update Source:${NC} ${SOURCE}"
+echo -e "  ${CYAN}Update Source:${NC} GitHub"
 echo ""
 echo -e "Directory structure:"
 echo -e "  Root:   ${WEBROOT}/"

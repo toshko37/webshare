@@ -19,7 +19,8 @@ NC='\033[0m'
 INSTALL_DIR="${INSTALL_DIR:-/var/www/webshare}"
 SRC_DIR="$INSTALL_DIR/src"
 BACKUP_DIR="${INSTALL_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
-SOURCE_URL="https://webshare.techbg.net"
+# Source: GitHub only (the dev/beta channel was removed, docs/decisions.md D-023)
+SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/src"
 AUTO_CONFIRM=false
 
 # Parse arguments
@@ -143,41 +144,70 @@ fi
 echo ""
 echo -e "${BLUE}[3/6] Downloading PHP files...${NC}"
 
-PHP_FILES=(
-    "index.php"
-    "upload.php"
-    "public.php"
-    "download.php"
-    "t.php"
-    "text.php"
-    "share.php"
-    "folder-management.php"
-    "encryption.php"
-    "audit-log.php"
-    "geo-check.php"
-    "user-management.php"
-    "html-sanitizer.php"
-    "smtp-mailer.php"
-    "send-mail.php"
-    "web-download.php"
-    "api-upload.php"
-    "api-scripts.php"
-    "check-version.php"
-    "do-update.php"
-    "live-update.php"
-    "p.php"
-    "u.php"
-    "get.php"
-    "get-speedtest.php"
-    "get-update.php"
-    "get-update-script.php"
-    "security-headers.php"
-    "f.php"
-)
+# File list: src/manifest.txt is the single source of truth (also used by
+# live-update.php's lists, checked by tests/manifest-test.sh). The embedded
+# list is only a fallback for sources that do not publish the manifest yet.
+PHP_FILES=()
+if MANIFEST_TXT=$(curl -fsSL "$SOURCE_URL/manifest.txt" 2>/dev/null); then
+    while IFS= read -r mf; do
+        mf="${mf%$'\r'}"
+        case "$mf" in ''|'#'*|*..*|/*) ;; *) PHP_FILES+=("$mf") ;; esac
+    done <<< "$MANIFEST_TXT"
+fi
+if [ ${#PHP_FILES[@]} -eq 0 ]; then
+    PHP_FILES=(
+        "security-check.php"
+        "login.php"
+        "logout.php"
+        "index.php"
+        "upload.php"
+        "upload-guard.php"
+        "error-page.php"
+        "auth-guard.php"
+        "public.php"
+        "download.php"
+        "t.php"
+        "text.php"
+        "share.php"
+        "folder-management.php"
+        "encryption.php"
+        "audit-log.php"
+        "geo-check.php"
+        "user-management.php"
+        "html-sanitizer.php"
+        "smtp-mailer.php"
+        "send-mail.php"
+        "web-download.php"
+        "api-upload.php"
+        "api-scripts.php"
+        "check-version.php"
+        "do-update.php"
+        "live-update.php"
+        "p.php"
+        "u.php"
+        "f.php"
+        "get.php"
+        "get-speedtest.php"
+        "get-update.php"
+        "get-update-script.php"
+        "security-headers.php"
+        "ui-kit.css"
+        "ui-kit.js"
+        "favicon.ico"
+        "favicon.svg"
+        "apple-touch-icon.png"
+        "CHANGELOG.md"
+        "version.json"
+        "robots.txt"
+        "assets/quill/quill.js"
+        "assets/quill/quill.snow.css"
+    )
+fi
 
 cd "$SRC_DIR"
 
 for file in "${PHP_FILES[@]}"; do
+    mkdir -p "$(dirname "$SRC_DIR/$file")"
     echo -n "  $file... "
     if curl -fsSL "$SOURCE_URL/$file" -o "$file.new" 2>/dev/null; then
         mv "$file.new" "$file"
@@ -206,9 +236,7 @@ done
 
 # .htaccess
 echo -n "  .htaccess... "
-if curl -fsSL "$SOURCE_URL/htaccess.txt" -o ".htaccess.new" 2>/dev/null; then
-    # Update AuthUserFile path
-    sed -i "s|__HTPASSWD_PATH__|$INSTALL_DIR/.htpasswd|g" ".htaccess.new"
+if curl -fsSL "$SOURCE_URL/.htaccess" -o ".htaccess.new" 2>/dev/null; then
     mv ".htaccess.new" ".htaccess"
     echo -e "${GREEN}OK${NC}"
 else
@@ -253,7 +281,7 @@ else
 fi
 
 # Installer scripts
-INSTALLER_URL="https://webshare.techbg.net/installer"
+INSTALLER_URL="https://raw.githubusercontent.com/toshko37/webshare/main/installer"
 mkdir -p "$INSTALL_DIR/installer"
 
 echo -n "  installer/update.sh... "
@@ -308,6 +336,18 @@ chmod -R 755 "$INSTALL_DIR/files" 2>/dev/null || true
 chmod -R 755 "$INSTALL_DIR/texts" 2>/dev/null || true
 chmod -R 755 "$SRC_DIR/assets" 2>/dev/null || true
 echo -e "${GREEN}Permissions set${NC}"
+
+# Server hardening: data file permissions, fail2ban jail, log rotation, daily backup.
+# Idempotent; existing jail/backup settings are left alone. Always from GitHub (stable).
+HARDEN_BASE="https://raw.githubusercontent.com/toshko37/webshare/main"
+mkdir -p "$INSTALL_DIR/installer" "$INSTALL_DIR/tools"
+curl -fsSL "$HARDEN_BASE/installer/harden.sh" -o "$INSTALL_DIR/installer/harden.sh" 2>/dev/null && chmod 755 "$INSTALL_DIR/installer/harden.sh"
+curl -fsSL "$HARDEN_BASE/tools/webshare-backup.sh" -o "$INSTALL_DIR/tools/webshare-backup.sh" 2>/dev/null && chmod 755 "$INSTALL_DIR/tools/webshare-backup.sh"
+if [ -x "$INSTALL_DIR/installer/harden.sh" ]; then
+    bash "$INSTALL_DIR/installer/harden.sh" "$INSTALL_DIR" || true
+else
+    echo "  harden.sh not available, hardening skipped"
+fi
 
 # Step 6: Verify
 echo ""

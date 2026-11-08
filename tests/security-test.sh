@@ -19,17 +19,19 @@ echo "U5 internal files are not served"
 for f in README.md README-BG.md SECURITY-AUDIT.md GeoLite2-Country.mmdb x.php.bak x.php~ x.php.bak-20260101 .users.json .auth-attempts.json; do
     check "$f -> 403/404" "$(code "$URL/$f" | sed 's/404/403/')" 403
 done
-for f in CHANGELOG.md version.json htaccess.txt user.ini.txt robots.txt ui-kit.css; do
-    check "$f still public (updates need it)" "$(code "$URL/$f")" 200
+for f in CHANGELOG.md version.json robots.txt ui-kit.css; do
+    check "$f still public" "$(code "$URL/$f")" 200
 done
 
 echo "U11 search engines"
 check "robots.txt disallows all" "$(curl -sk "$URL/robots.txt" | grep -c '^Disallow: /$')" 1
 check "X-Robots-Tag on /u" "$(curl -skI "$URL/u" | grep -ci '^x-robots-tag: noindex')" 1
 
-echo "U4 update channel endpoint"
-check "anonymous POST does not reach the handler" "$(curl -sk -X POST "$URL/index.php?action=set_update_source" -d use_beta=1 | grep -c '"success":true')" 0
+echo "U4 / D-023 update channel"
 check "no call to the missing validateCsrfToken()" "$(grep -c 'validateCsrfToken' "$SRC/index.php")" 0
+check "beta channel switch is gone" "$(grep -c 'set_update_source\|useBetaServer' "$SRC/index.php")" 0
+check "live update and version check use GitHub only" "$(cat "$SRC/live-update.php" "$SRC/check-version.php" | grep -c "'https://webshare.techbg.net")" 0
+check "dev copies are not served" "$(code "$URL/htaccess.txt" | sed 's/403/404/')$(code "$URL/user.ini.txt" | sed 's/403/404/')" 404404
 
 echo "U2 login redirect"
 check "login page with //evil.com still renders" "$(code "$URL/login.php?redirect=//evil.com")" 200
@@ -46,10 +48,19 @@ check "stored name ends in .enc" "${NAME##*.}" enc
 check "encrypted file exists" "$( [ -f "$SRC/files/admin/$NAME" ] && echo 1 || echo 0)" 1
 check "plain file was removed" "$( [ -f "$SRC/files/admin/${NAME%.enc}" ] && echo 1 || echo 0)" 0
 check "decrypts back to the original" "$(asw "require 'encryption.php'; \$r = decryptFile('files/admin/$NAME', 'test1234'); echo \$r['data'] ?? '';")" "secret content $$"
+check "new files use format v2 (I1)" "$(head -c4 "$SRC/files/admin/$NAME")" WSE2
+PTOK="enctest$$"
+asw "\$f='.tokens.json'; \$d=json_decode(file_get_contents(\$f),true)?:[]; \$d['$PTOK']=['filename'=>'$NAME','folder'=>'admin','created'=>time()]; file_put_contents(\$f,json_encode(\$d,JSON_PRETTY_PRINT));"
+check "public link: wrong password shows the form (I3)" "$(curl -sk -d decrypt_password=nope "$URL/public.php?t=$PTOK" | grep -c 'Invalid password')" 1
+check "public link: right password streams the plaintext (I2)" "$(curl -sk -d decrypt_password=test1234 "$URL/public.php?t=$PTOK")" "secret content $$"
+check "public link: original name in Content-Disposition" "$(curl -sk -D - -o /dev/null -d decrypt_password=test1234 "$URL/public.php?t=$PTOK" | grep -ci "filename\*=UTF-8''${NAME%.enc}")" 1
+asw "\$f='.tokens.json'; \$d=json_decode(file_get_contents(\$f),true); unset(\$d['$PTOK']); file_put_contents(\$f,json_encode(\$d,JSON_PRETTY_PRINT));
+     require 'auth-guard.php'; \$a=json_decode(@file_get_contents(WS_AUTH_ATTEMPTS_FILE),true)?:[];
+     foreach (\$a as \$k=>\$v) if (strpos(\$k,'file-password|')===0) unset(\$a[\$k]); file_put_contents(WS_AUTH_ATTEMPTS_FILE,json_encode(\$a));"
 asw "require 'user-management.php'; require 'encryption.php';
      @unlink('files/admin/$NAME'); revokeApiKey('admin', '$KID');
      \$m = loadFilesMeta(); unset(\$m['admin/$NAME']); saveFilesMeta(\$m);
-     \$k = json_decode(file_get_contents('.encryption-keys.json'), true) ?: []; unset(\$k['$NAME']);
+     \$k = json_decode(file_get_contents('.encryption-keys.json'), true) ?: []; unset(\$k['$NAME'], \$k['admin/$NAME']);
      file_put_contents('.encryption-keys.json', json_encode(\$k, JSON_PRETTY_PRINT));"
 check "test key revoked (401/403)" "$(code -H "X-API-Key: $KVAL" -F "file=@$TMP/enc-test-$$.txt" "$URL/api-upload.php" | sed s/401/403/)" 403
 
@@ -60,14 +71,14 @@ asw "\$f='.folder-shares.json'; \$d=json_decode(file_get_contents(\$f),true)?:[]
      file_put_contents(\$f,json_encode(\$d,JSON_PRETTY_PRINT));"
 for i in $(seq 1 10); do curl -sk -o /dev/null -c "$TMP/c" -b "$TMP/c" -d password=wrong "$URL/f/$TOK"; done
 check "11th attempt is locked" "$(curl -sk -c "$TMP/c" -b "$TMP/c" -d password=right "$URL/f/$TOK" | grep -c 'Твърде много грешни опити')" 1
-check "fail2ban log line written" "$( [ "$(grep -c 'where=share-password' /var/log/fpm-php.webshare.log)" -ge 10 ] && echo 1 || echo 0)" 1
+check "fail2ban log line written" "$( [ "$(grep -c 'where=share-password' "$SRC/../logs/auth.log")" -ge 10 ] && echo 1 || echo 0)" 1
 asw "\$f='.folder-shares.json'; \$d=json_decode(file_get_contents(\$f),true); unset(\$d['$TOK']); file_put_contents(\$f,json_encode(\$d,JSON_PRETTY_PRINT));
      require 'auth-guard.php'; \$a=json_decode(@file_get_contents(WS_AUTH_ATTEMPTS_FILE),true)?:[];
      foreach (\$a as \$k=>\$v) if (strpos(\$k,'share-password|')===0) unset(\$a[\$k]); file_put_contents(WS_AUTH_ATTEMPTS_FILE,json_encode(\$a));"
 
 echo "U6 fail2ban"
 if command -v fail2ban-client >/dev/null; then
-    check "jail webshare reads the PHP log" "$(fail2ban-client status webshare | grep -c fpm-php.webshare.log)" 1
+    check "jail webshare reads logs/auth.log" "$(fail2ban-client status webshare | grep -c logs/auth.log)" 1
 fi
 
 echo "U9 permissions"

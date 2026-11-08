@@ -5,9 +5,9 @@
  *
  * - ws_attempts_blocked() / ws_attempt_failed() / ws_attempt_clear(): per-IP
  *   failure counters in a sliding window, one JSON file, flock-protected.
- * - ws_log_auth_failure(): one line per failure in the PHP error log
- *   (FPM pool: /var/log/fpm-php.webshare.log), read by the fail2ban jail
- *   "webshare". Format is fixed; the fail2ban filter depends on it:
+ * - ws_log_auth_failure(): one line per failure in logs/auth.log next to src/
+ *   (fallback: the PHP error log), read by the fail2ban jail "webshare".
+ *   Format is fixed; the fail2ban filter depends on it:
  *   "WebShare auth failure: where=<scope> ip=<ip>"
  */
 
@@ -74,12 +74,25 @@ function ws_attempt_clear($scope, $ip = null) {
     });
 }
 
-/** fail2ban hook, see the header for the format */
+if (!defined('WS_AUTH_LOG')) {
+    // Outside the DocumentRoot; created by installer/harden.sh (fail2ban reads it)
+    define('WS_AUTH_LOG', dirname(__DIR__) . '/logs/auth.log');
+}
+
+/**
+ * fail2ban hook, see the header for the format. Written to logs/auth.log
+ * (with its own timestamp) when that directory exists, otherwise to the PHP
+ * error log, so it works with PHP-FPM and with mod_php.
+ */
 function ws_log_auth_failure($where, $ip = null) {
     $ip = $ip ?? ws_auth_client_ip();
     $where = preg_replace('/[^a-z0-9_-]/i', '', (string)$where);
     if (!filter_var($ip, FILTER_VALIDATE_IP)) return;
-    error_log("WebShare auth failure: where=$where ip=$ip");
+    $line = "WebShare auth failure: where=$where ip=$ip";
+    if (is_dir(dirname(WS_AUTH_LOG)) && @file_put_contents(WS_AUTH_LOG, date('Y-m-d H:i:s ') . $line . "\n", FILE_APPEND | LOCK_EX) !== false) {
+        return;
+    }
+    error_log($line);
 }
 
 /**

@@ -76,45 +76,19 @@ if ($isEncrypted) {
         exit;
     }
 
-    // Verify password first
-    if (!verifyEncryptionPassword($filename, $password)) {
-        showDecryptionForm($filename, $folder, $subpath, 'Invalid password');
+    // Decrypt and stream (I2). The password is checked by decryption itself (I3),
+    // nothing is sent when it is wrong.
+    $originalFilename = getOriginalFilename($filename);
+    $result = decryptToBrowser($filePath, $password, $originalFilename);
+    if (!$result['success']) {
+        showDecryptionForm($filename, $folder, $subpath, $result['error']);
         exit;
-    }
-
-    // Decrypt the file
-    $decryptResult = decryptFile($filePath, $password);
-
-    if (!$decryptResult['success']) {
-        showDecryptionForm($filename, $folder, $subpath, $decryptResult['error']);
-        exit;
-    }
-
-    // Get original filename and data
-    $originalFilename = $decryptResult['original_filename'];
-    $decryptedData = $decryptResult['data'];
-    $fileSize = strlen($decryptedData);
-
-    // Try to determine mime type from original filename
-    $finfo = new finfo(FILEINFO_MIME_TYPE);
-    $mimeType = $finfo->buffer($decryptedData);
-    if (!$mimeType) {
-        $mimeType = 'application/octet-stream';
     }
 
     // Audit log - decrypted download
-    $fileSizeFormatted = formatFileSize($fileSize);
+    $fileSizeFormatted = formatFileSize($result['size']);
     $folderDisplay = $folder ? ($folder === '_public' ? 'Public' : $folder) : 'legacy';
     writeAuditLog('download_decrypted', "File: $originalFilename ($fileSizeFormatted) from folder: $folderDisplay");
-
-    // Send decrypted file
-    header('Content-Type: ' . $mimeType);
-    header('Content-Length: ' . $fileSize);
-    header('Content-Disposition: attachment; filename="' . $originalFilename . '"');
-    header('Cache-Control: no-cache, must-revalidate');
-    header('Expires: 0');
-
-    echo $decryptedData;
     exit;
 }
 

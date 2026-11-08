@@ -6,6 +6,7 @@
 |---|---|
 | [upload-guard.md](upload-guard.md) | Защита на анонимното качване: режими, проверка, пропуски, лимити, curl, админ панел, данни, тестове |
 | [security-hardening.md](security-hardening.md) | Спешните точки U2–U11: поправки, защита от налучкване, fail2ban, права |
+| [security-plan-2.md](security-plan-2.md) | Важните точки I1–I16 и група 4: план, статус, тестове |
 | [backup.md](backup.md) | Архивиране: какво, къде, колко дълго, възстановяване |
 | [decisions.md](decisions.md) | Дневник на решенията с контекст и причини |
 | [audit-2026-11-08.md](audit-2026-11-08.md) | Технически одит и статус на всяка находка |
@@ -21,6 +22,8 @@ tests/upload-guard-test.sh https://webshare.techbg.net    # end-to-end срещ�
 node tests/ui-audit.js ...                                # UI/UX одит, виж заглавието на файла
 php tests/security-unit.php                               # unit, защита от налучкване и пренасочване
 tests/security-test.sh https://webshare.techbg.net        # end-to-end, като root на сървъра
+php -d memory_limit=128M tests/encryption-unit.php --big  # криптиране v1/v2, 300 MB на поток
+php tests/manifest-test.php                               # списъците на файловете са в синхрон
 ```
 
 ## Правила за документацията

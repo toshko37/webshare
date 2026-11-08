@@ -128,29 +128,37 @@ function sanitizeUsername($name) {
     return $name ?: 'Гост';
 }
 
-// Rate limiting check
-function checkRateLimit($userId) {
-    $rateLimitFile = sys_get_temp_dir() . '/webshare_rate_' . md5($userId) . '.json';
+// Rate limiting (I10): the author ID comes from the client and can be changed
+// at will, so the limit is also counted per IP. Both counters must have room.
+// The IP limit is higher because several people may share one address (NAT).
+define('RATE_LIMIT_MESSAGES_PER_IP', 90);
+
+function rateLimitBump($key, $max) {
+    $file = sys_get_temp_dir() . '/webshare_rate_' . md5($key) . '.json';
     $now = time();
-
-    if (file_exists($rateLimitFile)) {
-        $data = json_decode(file_get_contents($rateLimitFile), true) ?? ['count' => 0, 'window_start' => $now];
-    } else {
-        $data = ['count' => 0, 'window_start' => $now];
-    }
-
-    // Reset window if expired
+    $fh = @fopen($file, 'c+');
+    if (!$fh) return true;
+    flock($fh, LOCK_EX);
+    $data = json_decode(stream_get_contents($fh) ?: '', true) ?: ['count' => 0, 'window_start' => $now];
     if ($now - $data['window_start'] > RATE_LIMIT_WINDOW) {
         $data = ['count' => 0, 'window_start' => $now];
     }
-
-    if ($data['count'] >= RATE_LIMIT_MESSAGES) {
-        return false;
+    $ok = $data['count'] < $max;
+    if ($ok) {
+        $data['count']++;
+        ftruncate($fh, 0);
+        rewind($fh);
+        fwrite($fh, json_encode($data));
     }
+    flock($fh, LOCK_UN);
+    fclose($fh);
+    return $ok;
+}
 
-    $data['count']++;
-    file_put_contents($rateLimitFile, json_encode($data));
-    return true;
+function checkRateLimit($userId) {
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    return rateLimitBump('ip|' . $ip, RATE_LIMIT_MESSAGES_PER_IP)
+        && rateLimitBump('user|' . $userId, RATE_LIMIT_MESSAGES);
 }
 
 // Get URL parameters

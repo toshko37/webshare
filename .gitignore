@@ -96,3 +96,6 @@ docs/assets/
 
 # Brute-force counters (src/auth-guard.php)
 src/.auth-attempts.json
+
+# Auth failure log for fail2ban (installer/harden.sh)
+logs/

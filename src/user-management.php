@@ -31,6 +31,16 @@ function userExists($username) {
     return isset($users[$username]);
 }
 
+// I8: minimum length for NEW passwords (existing ones keep working)
+define('WS_MIN_PASSWORD_LENGTH', 8);
+
+function passwordProblem($password) {
+    if (strlen($password) < WS_MIN_PASSWORD_LENGTH) {
+        return 'Паролата трябва да е поне ' . WS_MIN_PASSWORD_LENGTH . ' символа';
+    }
+    return null;
+}
+
 function addUser($username, $password, $role = 'user') {
     if (!preg_match('/^[a-zA-Z0-9_-]{3,20}$/', $username)) {
         return ['success' => false, 'error' => 'Невалидно потребителско име (3-20 знака, a-z 0-9 - _)'];
@@ -38,8 +48,8 @@ function addUser($username, $password, $role = 'user') {
     if (userExists($username)) {
         return ['success' => false, 'error' => 'Потребителят вече съществува'];
     }
-    if (strlen($password) < 4) {
-        return ['success' => false, 'error' => 'Паролата трябва да е поне 4 символа'];
+    if ($err = passwordProblem($password)) {
+        return ['success' => false, 'error' => $err];
     }
     $users = loadUsers();
     $users[$username] = [
@@ -56,8 +66,8 @@ function changePassword($username, $newPassword) {
     if (!userExists($username)) {
         return ['success' => false, 'error' => 'Потребителят не е намерен'];
     }
-    if (strlen($newPassword) < 4) {
-        return ['success' => false, 'error' => 'Паролата трябва да е поне 4 символа'];
+    if ($err = passwordProblem($newPassword)) {
+        return ['success' => false, 'error' => $err];
     }
     $users = loadUsers();
     $users[$username]['password_hash'] = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 12]);
@@ -407,6 +417,20 @@ function migrateApiKeysFormat(&$keys) {
             $migrated = true;
         }
     }
+    // I11: plaintext keys are replaced by a SHA-256 hash (+ prefix/suffix for display)
+    foreach ($keys as &$userData) {
+        if (!isset($userData['keys']) || !is_array($userData['keys'])) continue;
+        foreach ($userData['keys'] as &$k) {
+            if (isset($k['key'])) {
+                $k['key_hash'] = hash('sha256', $k['key']);
+                $k['key_hint'] = substr($k['key'], 0, 8) . '...' . substr($k['key'], -4);
+                unset($k['key']);
+                $migrated = true;
+            }
+        }
+        unset($k);
+    }
+    unset($userData);
     return $migrated;
 }
 
@@ -432,7 +456,8 @@ function generateApiKey($username, $name = null, $allowedIps = null) {
 
     $newKey = [
         'id' => $keyId,
-        'key' => $apiKey,
+        'key_hash' => hash('sha256', $apiKey),           // I11: the key itself is shown once and not stored
+        'key_hint' => substr($apiKey, 0, 8) . '...' . substr($apiKey, -4),
         'name' => $name ?: 'Key ' . (count($keys[$username]['keys']) + 1),
         'created' => time(),
         'last_used' => null,
@@ -449,9 +474,8 @@ function generateApiKey($username, $name = null, $allowedIps = null) {
  * Get user's first API key (backward compatibility)
  */
 function getUserApiKey($username) {
-    $keys = loadApiKeys();
-    migrateApiKeysFormat($keys);
-    return $keys[$username]['keys'][0]['key'] ?? null;
+    // I11: keys are stored hashed; the plaintext is only available right after generation
+    return null;
 }
 
 /**
@@ -477,7 +501,7 @@ function getUserApiKeys($username) {
         $result[] = [
             'id' => $keyData['id'],
             'name' => $keyData['name'],
-            'key_preview' => substr($keyData['key'], 0, 8) . '...' . substr($keyData['key'], -4),
+            'key_preview' => $keyData['key_hint'] ?? '…',
             'created' => $keyData['created'],
             'last_used' => $keyData['last_used'],
             'allowed_ips' => $allowedIps,
@@ -493,18 +517,7 @@ function getUserApiKeys($username) {
  * Get full API key by ID (for display after generation)
  */
 function getApiKeyById($username, $keyId) {
-    $keys = loadApiKeys();
-    migrateApiKeysFormat($keys);
-
-    if (!isset($keys[$username]['keys'])) {
-        return null;
-    }
-
-    foreach ($keys[$username]['keys'] as $keyData) {
-        if ($keyData['id'] === $keyId) {
-            return $keyData['key'];
-        }
-    }
+    // I11: keys are stored hashed; the plaintext is only available right after generation
     return null;
 }
 
@@ -580,9 +593,16 @@ function ipInCidr($ip, $cidr) {
  * @param bool $returnDetails If true, returns array with user and key_id
  * @return string|array|null Username (or array if $returnDetails), null if invalid
  */
-function validateApiKey($apiKey, $clientIp = null, $returnDetails = false) {
+function validateApiKey($apiKey, $clientIp = null, $returnDetails = false, $touch = true) {
     $keys = loadApiKeys();
     $migrated = migrateApiKeysFormat($keys);
+    if ($migrated) {
+        saveApiKeys($keys);
+    }
+    if (!is_string($apiKey) || $apiKey === '') {
+        return null;
+    }
+    $apiKeyHash = hash('sha256', $apiKey);
 
     if ($clientIp === null) {
         $clientIp = $_SERVER['REMOTE_ADDR'] ?? null;
@@ -592,7 +612,11 @@ function validateApiKey($apiKey, $clientIp = null, $returnDetails = false) {
         if (!isset($data['keys'])) continue;
 
         foreach ($data['keys'] as $idx => $keyData) {
-            if (hash_equals($keyData['key'], $apiKey)) {
+            if (isset($keyData['key_hash']) && hash_equals($keyData['key_hash'], $apiKeyHash)) {
+                if (!$touch) {
+                    // Lookup only (script download): no IP learning, no last_used update
+                    return $returnDetails ? ['user' => $username, 'key_id' => $keyData['id'], 'key_name' => $keyData['name']] : $username;
+                }
                 $allowedIps = $keyData['allowed_ips'];
                 $keyId = $keyData['id'];
                 $keyName = $keyData['name'];
@@ -625,11 +649,6 @@ function validateApiKey($apiKey, $clientIp = null, $returnDetails = false) {
                 return $username;
             }
         }
-    }
-
-    // Save if migrated
-    if ($migrated) {
-        saveApiKeys($keys);
     }
 
     return null;

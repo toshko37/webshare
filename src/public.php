@@ -37,6 +37,11 @@ if (!isset($tokens[$token])) {
 }
 
 $fileData = $tokens[$token];
+
+// I7: links with an expiry stop working after it
+if (!empty($fileData['expires']) && $fileData['expires'] < time()) {
+    wsErrorPage(410, 'Линкът е изтекъл', 'Срокът на този линк изтече на ' . date('d.m.Y H:i', $fileData['expires']) . '. Поискай нов линк от човека, който ти го е пратил.');
+}
 $filename = basename($fileData['filename']);
 
 // Build file path - handle folder paths from tokens
@@ -83,46 +88,23 @@ if ($isEncrypted) {
         exit;
     }
 
-    // Verify password first
-    if (!verifyEncryptionPassword($filename, $password)) {
-        ws_attempt_failed('file-password', 900);
-        showPublicDecryptionForm($filename, $token, 'Invalid password');
+    // Decrypt and stream (I2). The password is checked by decryption itself (I3),
+    // nothing is sent when it is wrong.
+    $originalFilename = getOriginalFilename($filename);
+    $result = decryptToBrowser($filePath, $password, $originalFilename);
+    if (!$result['success']) {
+        if (strpos($result['error'], 'wrong password') !== false) {
+            ws_attempt_failed('file-password', 900);
+            $result['error'] = 'Invalid password';
+        }
+        showPublicDecryptionForm($filename, $token, $result['error']);
         exit;
     }
     ws_attempt_clear('file-password');
 
-    // Decrypt the file
-    $decryptResult = decryptFile($filePath, $password);
-
-    if (!$decryptResult['success']) {
-        showPublicDecryptionForm($filename, $token, $decryptResult['error']);
-        exit;
-    }
-
-    // Get original filename and data
-    $originalFilename = $decryptResult['original_filename'];
-    $decryptedData = $decryptResult['data'];
-    $fileSize = strlen($decryptedData);
-
-    // Try to determine mime type from original filename
-    $finfo = new finfo(FILEINFO_MIME_TYPE);
-    $mimeType = $finfo->buffer($decryptedData);
-    if (!$mimeType) {
-        $mimeType = 'application/octet-stream';
-    }
-
     // Audit log - public decrypted download
-    $fileSizeFormatted = formatFileSize($fileSize);
+    $fileSizeFormatted = formatFileSize($result['size']);
     writeAuditLog('public_download_decrypted', "File: $originalFilename ($fileSizeFormatted) via token: $token", 'anonymous');
-
-    // Send decrypted file
-    header('Content-Type: ' . $mimeType);
-    header('Content-Length: ' . $fileSize);
-    header('Content-Disposition: attachment; filename="' . $originalFilename . '"');
-    header('Cache-Control: no-cache, must-revalidate');
-    header('Expires: 0');
-
-    echo $decryptedData;
     exit;
 }
 

@@ -191,3 +191,65 @@
 - fail2ban, правата и архивът в инсталатора за другите инсталации.
 
 **Уточнение от собственика.** VM-ът се архивира от Proxmox, затова второ копие на архива не е нужно (D-016 е обновено). Този сървър е едновременно работно копие и източник на beta канала. Стабилната версия се публикува в GitHub.
+
+## 2026-11-08 · Групи 1–4: I1–I16 и инсталатор
+
+План и статус в [security-plan-2.md](security-plan-2.md). Решения D-017 до D-022.
+
+**Код**
+- Променени:
+  - `src/geo-check.php` (I14);
+  - `src/.htaccess` и `src/htaccess.txt` (I12);
+  - `src/index.php` (I8, I14, I7, I11, I16, I3; заглавие на колона);
+  - `src/user-management.php` (I8, I11);
+  - `src/security-check.php` (I8);
+  - `src/t.php` (I10);
+  - `src/share.php` (I7, търсене по папка и име, проверка на достъпа);
+  - `src/public.php` (I7, I2, I3);
+  - `src/api-upload.php` и `src/api-scripts.php` (I11);
+  - `src/encryption.php` (I1–I3);
+  - `src/download.php`, `src/upload.php` (I2, I3);
+  - `src/login.php` (I16);
+  - `src/auth-guard.php` (`logs/auth.log`);
+  - `src/live-update.php` (защита срещу HTML вместо PHP).
+- Нови: `src/manifest.txt`, `installer/harden.sh`.
+- Четирите инсталатора четат манифеста и пускат `harden.sh`.
+- Нови тестове: `tests/encryption-unit.php`, `tests/manifest-test.php`. Тестовете в `tests/security-test.sh` са вече 40.
+
+**Данни**
+- `.api-keys.json`: двата истински ключа на admin са мигрирани към хеш и продължават да работят. Открит вид още има в нощния архив от 2026-11-08 в `/var/backups/webshare/meta/`, който ще изтече след 30 дни.
+- `.tokens.json`: по време на тест случайно беше добавен празен ключ `""`. Изтрит е веднага. Тестовите линкове са премахнати.
+- `.encryption-keys.json`: един тестов остатък е изтрит.
+
+**Сървър**
+- `installer/harden.sh /var/www/webshare` е пуснат два пъти; второто пускане не променя нищо.
+- `logs/auth.log` е създаден.
+- В `jail.local` `[webshare]` `logpath` вече сочи `/var/www/webshare/logs/auth.log`. Проверено с `fail2ban-regex`.
+- `/etc/logrotate.d/webshare-auth`.
+
+**Тестове.** Всички минават, виж таблицата в плана. Upload Guard e2e падна веднъж заради лимита за проверки на IP след многото пускания. След нулиране на броячите минава 18/18.
+
+**Не е тествано**
+- Реална инсталация с `get-webshare.sh` или `install.sh` на чист сървър. Тестван е само блокът за сваляне по манифеста.
+- Turnstile с CSP при истински ключове.
+- Сваляне на скрипт за Windows от браузър: проверено е с curl.
+
+## 2026-11-08 · Премахнат beta канал (D-023)
+
+**Код**
+- `src/live-update.php` и `src/check-version.php` ползват само GitHub.
+- `src/index.php`: махнати са отметката за beta, endpoint-ите `get_update_source` и `set_update_source` и текстът за webshare.techbg.net в диалога за обновяване.
+- `src/get-update`: тегли `update.sh` от GitHub.
+- `src/.htaccess`: махнато е разрешението за `htaccess.txt`, а `user.ini.txt` е забранен.
+- Инсталаторите (`get-webshare.sh`, `install.sh`, `update.sh`, `update-remote.sh`) ползват само GitHub, а `--source` се игнорира.
+- `README.md` и `src/README.md` са обновени.
+
+**Изтрити**
+- `src/htaccess.txt` (`git rm`).
+- `.update-config.json` и симлинкът към него в `src/`.
+
+**Тестове**
+- `tests/security-test.sh`: 40/40, с нови проверки за D-023.
+- `tests/manifest-test.php`: 16/16.
+- `check-version.php` с админ сесия връща версията от GitHub, 3.7.1.
+- Chromium: без грешки в Files, Settings и Help.

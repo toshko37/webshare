@@ -12,11 +12,17 @@
 
 require_once __DIR__ . '/user-management.php';
 
-$type = $_GET['type'] ?? '';
-$apiKey = $_GET['key'] ?? '';
+// I11: POST only, so the key does not end up in access logs or browser history.
+// Lookup only: downloading a script must not lock the key to the browser's IP.
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    die('POST required');
+}
+$type = $_POST['type'] ?? '';
+$apiKey = trim($_POST['key'] ?? '');
 
 // Validate API key
-$user = validateApiKey($apiKey);
+$user = validateApiKey($apiKey, null, false, false);
 if (!$user) {
     http_response_code(403);
     die('Invalid API key');

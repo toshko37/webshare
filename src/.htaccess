@@ -72,7 +72,7 @@ RewriteRule ^get-update-script$ get-update-script.php [QSA,L]
 # All PHP files are accessible by Apache; security-check.php handles login.
 
 # Deny direct access to sensitive data files
-<FilesMatch "^(?!version\.json$|htaccess\.txt$|user\.ini\.txt$).*\.(json|html|htm)$">
+<FilesMatch "^(?!version\.json$).*\.(json|html|htm)$">
     Require all denied
 </FilesMatch>
 
@@ -81,16 +81,30 @@ RewriteRule ^get-update-script$ get-update-script.php [QSA,L]
     Require all granted
 </FilesMatch>
 
-# htaccess.txt and user.ini.txt - public (for live-update)
-<FilesMatch "^(htaccess|user\.ini)\.txt$">
-    Require all granted
+# user.ini.txt is the git copy of .user.ini (installers fetch it from GitHub, not from here)
+<FilesMatch "^user\.ini\.txt$">
+    Require all denied
 </FilesMatch>
 
-# Security Headers
+# Security Headers (I12). One copy of each: PHP-set duplicates are removed
+# ("Header unset" = normal table) and the value is set once in the "always"
+# table, which also replaces the same header from the vhost.
+# CSP: everything is self-hosted; Turnstile is the only third party.
+# 'unsafe-inline' is still needed for the inline scripts/handlers in the pages.
 <IfModule mod_headers.c>
-    Header set X-Frame-Options "SAMEORIGIN"
-    Header set X-Content-Type-Options "nosniff"
-    Header set X-XSS-Protection "1; mode=block"
+    Header unset X-Frame-Options
+    Header unset X-Content-Type-Options
+    Header unset X-XSS-Protection
+    Header unset Referrer-Policy
+    Header unset Permissions-Policy
+    Header unset Strict-Transport-Security
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-XSS-Protection "0"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=(), usb=()"
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com; frame-src 'self' blob: https://challenges.cloudflare.com; worker-src 'self' blob:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains" "expr=%{HTTPS} == 'on'"
 </IfModule>
 
 # U11: keep share links, upload and chat pages out of search engines
@@ -111,7 +125,7 @@ Options -Indexes
 </FilesMatch>
 
 # U5: documentation, backups, editor leftovers and data files are not public.
-# CHANGELOG.md stays public: the dev live-update channel downloads it.
+# CHANGELOG.md stays public (it is public on GitHub anyway).
 <FilesMatch "(?i)(^(?!CHANGELOG\.md$).*\.md$|\.(bak|old|orig|save|swp|swo|tmp|log|sql|dist|mmdb)$|\.bak-|~$)">
     Require all denied
 </FilesMatch>

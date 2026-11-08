@@ -41,23 +41,59 @@ function saveGeoConfig($config) {
     file_put_contents($configFile, json_encode($config, JSON_PRETTY_PRINT));
 }
 
+/**
+ * Client IP for GeoIP decisions (I14).
+ * Proxy headers (CF-Connecting-IP, X-Forwarded-For, X-Real-IP) are set by the
+ * client and are trusted ONLY when the direct peer (REMOTE_ADDR) is listed in
+ * "trusted_proxies" in .geo.json (IPs or CIDRs, e.g. Cloudflare ranges or a
+ * local reverse proxy). Default: no trusted proxies, REMOTE_ADDR only.
+ * Docs: docs/security-plan-2.md
+ */
 function getClientIP() {
-    // Check for proxy headers
-    $headers = ['HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'REMOTE_ADDR'];
-    foreach ($headers as $header) {
-        if (!empty($_SERVER[$header])) {
-            $ip = $_SERVER[$header];
-            // Handle comma-separated IPs (X-Forwarded-For)
-            if (strpos($ip, ',') !== false) {
-                $ip = trim(explode(',', $ip)[0]);
-            }
-            // Validate IP
-            if (filter_var($ip, FILTER_VALIDATE_IP)) {
-                return $ip;
-            }
+    $remote = $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    $config = loadGeoConfig();
+    $trusted = $config['trusted_proxies'] ?? [];
+    if (!$trusted || !geoIpInList($remote, $trusted)) {
+        return $remote;
+    }
+    foreach (['HTTP_CF_CONNECTING_IP', 'HTTP_X_REAL_IP'] as $h) {
+        if (!empty($_SERVER[$h]) && filter_var(trim($_SERVER[$h]), FILTER_VALIDATE_IP)) {
+            return trim($_SERVER[$h]);
         }
     }
-    return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+    if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+        // Right-most address that is not one of our proxies is the real client
+        $chain = array_reverse(array_map('trim', explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'])));
+        foreach ($chain as $ip) {
+            if (!filter_var($ip, FILTER_VALIDATE_IP)) break;
+            if (!geoIpInList($ip, $trusted)) return $ip;
+        }
+    }
+    return $remote;
+}
+
+/** True when $ip equals an entry or falls inside a CIDR in $list (IPv4 and IPv6) */
+function geoIpInList($ip, array $list) {
+    $bin = @inet_pton($ip);
+    if ($bin === false) return false;
+    foreach ($list as $entry) {
+        $entry = trim((string)$entry);
+        if (strpos($entry, '/') === false) {
+            if (@inet_pton($entry) === $bin) return true;
+            continue;
+        }
+        [$net, $bits] = explode('/', $entry, 2);
+        $netBin = @inet_pton($net);
+        $bits = (int)$bits;
+        if ($netBin === false || strlen($netBin) !== strlen($bin) || $bits < 0 || $bits > strlen($bin) * 8) continue;
+        $bytes = intdiv($bits, 8);
+        $rem = $bits % 8;
+        if (substr($bin, 0, $bytes) !== substr($netBin, 0, $bytes)) continue;
+        if ($rem === 0) return true;
+        $mask = chr((0xFF << (8 - $rem)) & 0xFF);
+        if ((substr($bin, $bytes, 1) & $mask) === (substr($netBin, $bytes, 1) & $mask)) return true;
+    }
+    return false;
 }
 
 function getCountryCode($ip) {

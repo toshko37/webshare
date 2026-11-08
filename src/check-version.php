@@ -1,11 +1,7 @@
 <?php
 /**
  * Version Check API
- * Checks for latest version from GitHub (stable) or webshare.techbg.net (dev)
- *
- * Config: .update-config.json
- * { "stable": true }  - Check GitHub releases (default)
- * { "stable": false } - Check webshare.techbg.net/version.json (for testing)
+ * Checks the latest release on GitHub (the only update source since D-023)
  */
 
 require_once __DIR__ . '/security-check.php';
@@ -23,20 +19,9 @@ if (file_exists($indexFile)) {
 define('WEBSHARE_VERSION', $currentVersion);
 
 $cacheFile = __DIR__ . '/.version-check.json';
-$configFile = __DIR__ . '/.update-config.json';
 $cacheMaxAge = 86400; // 24 hours in seconds
 
-// Load update config
-$config = ['stable' => true]; // Default: use GitHub
-if (file_exists($configFile)) {
-    $configData = json_decode(file_get_contents($configFile), true);
-    if (isset($configData['stable'])) {
-        $config['stable'] = (bool)$configData['stable'];
-    }
-}
-
 $githubRepo = 'toshko37/webshare';
-$devVersionUrl = 'https://webshare.techbg.net/version.json';
 
 // Check if we should use cache
 $useCache = true;
@@ -74,7 +59,7 @@ $result = [
     'published_at' => null,
     'checked_at' => time(),
     'from_cache' => false,
-    'source' => $config['stable'] ? 'github' : 'dev',
+    'source' => 'github',
     'error' => null
 ];
 
@@ -86,9 +71,8 @@ if (!function_exists('curl_init')) {
     exit;
 }
 
-// Choose source based on config
-if ($config['stable']) {
-    // ========== STABLE: Check GitHub releases ==========
+// ========== Check GitHub releases ==========
+{
     $apiUrl = "https://api.github.com/repos/{$githubRepo}/releases/latest";
 
     $ch = curl_init();
@@ -149,43 +133,6 @@ if ($config['stable']) {
         $result['error'] = "GitHub API error (HTTP {$httpCode})";
     }
 
-} else {
-    // ========== DEV: Check webshare.techbg.net ==========
-    $ch = curl_init();
-    curl_setopt_array($ch, [
-        CURLOPT_URL => $devVersionUrl,
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 10,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_SSL_VERIFYPEER => true,
-        CURLOPT_HTTPHEADER => [
-            'User-Agent: WebShare-UpdateChecker/' . WEBSHARE_VERSION
-        ]
-    ]);
-
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    $curlErrno = curl_errno($ch);
-    curl_close($ch);
-
-    if ($curlErrno !== 0) {
-        $result['error'] = "cURL error ($curlErrno): $curlError";
-    } elseif ($httpCode === 200 && $response) {
-        $data = json_decode($response, true);
-        if ($data && isset($data['version'])) {
-            $latestVersion = $data['version'];
-
-            $result['success'] = true;
-            $result['latest_version'] = $latestVersion;
-            $result['update_available'] = version_compare($latestVersion, WEBSHARE_VERSION, '>');
-            $result['release_notes'] = $data['changelog'] ?? null;
-            $result['published_at'] = $data['released'] ?? null;
-            $result['download_url'] = $data['download_url'] ?? null;
-        }
-    } else {
-        $result['error'] = "Dev server error (HTTP {$httpCode})";
-    }
 }
 
 // Save to cache

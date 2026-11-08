@@ -95,9 +95,10 @@ $canCreateSubfolder = (getFolderDepth($currentFolder) < MAX_SUBFOLDER_DEPTH);
 // Get all subfolders for the current user's base folder (for move modal)
 $allUserSubfolders = getAllSubfoldersRecursive($baseFolder, $currentUser);
 
-// Log page access once per session
+// I16: a password login is logged by login.php (which sets login_logged).
+// Here only sessions restored from the remember-me cookie are logged, once.
 if (!isset($_SESSION['login_logged']) || $_SESSION['login_logged'] !== $currentUser) {
-    writeAuditLog('login', "User logged in");
+    writeAuditLog('login', 'Session restored (remember me) from ' . ($_SERVER['REMOTE_ADDR'] ?? '?'));
     $_SESSION['login_logged'] = $currentUser;
 }
 
@@ -127,6 +128,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_geo']) && $isAdm
     $countries = array_filter($countries, fn($c) => preg_match('/^[A-Z]{2}$/', $c));
     $config['allowed_countries'] = array_values($countries);
     $config['blocked_message'] = $_POST['geo_message'] ?? 'Access denied from your location';
+    // I14: proxies whose X-Forwarded-For / CF-Connecting-IP is trusted (IPs or CIDRs)
+    $proxies = preg_split('/[\s,]+/', trim($_POST['geo_trusted_proxies'] ?? ''), -1, PREG_SPLIT_NO_EMPTY);
+    $config['trusted_proxies'] = array_values(array_filter($proxies, function ($p) {
+        [$ip, $bits] = array_pad(explode('/', $p, 2), 2, null);
+        return filter_var($ip, FILTER_VALIDATE_IP) && ($bits === null || ctype_digit($bits));
+    }));
     saveGeoConfig($config);
     // Audit log
     writeAuditLog('settings', "GeoIP settings updated: " . ($config['enabled'] ? 'enabled' : 'disabled') . ", countries: " . implode(',', $config['allowed_countries']));
@@ -406,6 +413,20 @@ if (isset($_GET['session_action'])) {
 
     if ($sAction === 'change_my_password' && $_SERVER['REQUEST_METHOD'] === 'POST' && validateCsrf()) {
         $newPw = $_POST['new_password'] ?? '';
+        // I8: the current password is required, with the same brute-force limit as the share passwords
+        require_once __DIR__ . '/auth-guard.php';
+        $users = loadUsers();
+        if (ws_attempts_blocked('own-password', 5, 900) > 0) {
+            ws_log_auth_failure('own-password-locked');
+            echo json_encode(['success' => false, 'error' => 'Too many wrong attempts. Try again in 15 minutes.']);
+            exit;
+        }
+        if (!password_verify($_POST['current_password'] ?? '', $users[$currentUser]['password_hash'] ?? '')) {
+            ws_attempt_failed('own-password', 900);
+            echo json_encode(['success' => false, 'error' => 'Current password is wrong']);
+            exit;
+        }
+        ws_attempt_clear('own-password');
         $result = changePassword($currentUser, $newPw);
         if ($result['success']) {
             writeAuditLog('user_password', "User changed own password");
@@ -417,52 +438,6 @@ if (isset($_GET['session_action'])) {
     }
 
     echo json_encode(['success' => false, 'error' => 'Invalid action']);
-    exit;
-}
-
-// Handle update source preference (AJAX)
-if (isset($_GET['action']) && $_GET['action'] === 'get_update_source') {
-    header('Content-Type: application/json');
-    $configFile = __DIR__ . '/.update-config.json';
-    $config = ['stable' => true];
-    if (file_exists($configFile)) {
-        $data = json_decode(file_get_contents($configFile), true);
-        if (isset($data['stable'])) {
-            $config['stable'] = (bool)$data['stable'];
-        }
-    }
-    echo json_encode($config);
-    exit;
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action']) && $_GET['action'] === 'set_update_source') {
-    header('Content-Type: application/json');
-    // U4: the helper is validateCsrf() (the old call was a fatal error), and only admins may switch the update channel
-    if (!validateCsrf()) {
-        http_response_code(403);
-        echo json_encode(['success' => false, 'error' => 'CSRF validation failed']);
-        exit;
-    }
-    if (!isAdmin()) {
-        http_response_code(403);
-        echo json_encode(['success' => false, 'error' => 'Admin only']);
-        exit;
-    }
-
-    $useBeta = isset($_POST['use_beta']) && $_POST['use_beta'] === '1';
-    $configFile = __DIR__ . '/.update-config.json';
-    $config = ['stable' => !$useBeta];
-
-    if (file_put_contents($configFile, json_encode($config, JSON_PRETTY_PRINT))) {
-        // Clear version cache to force re-check with new source
-        $cacheFile = __DIR__ . '/.version-check.json';
-        if (file_exists($cacheFile)) {
-            unlink($cacheFile);
-        }
-        echo json_encode(['success' => true, 'stable' => $config['stable']]);
-    } else {
-        echo json_encode(['success' => false, 'error' => 'Failed to save config']);
-    }
     exit;
 }
 
@@ -584,7 +559,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['crypt_action'])) {
             renameFileMeta($filename, $newFilename);
 
             // Store encryption password
-            storeEncryptionPassword($newFilename, $password, $currentUser);
+            storeEncryptionPassword($newFilename, $password, $currentUser, $currentFolder);
 
             // Audit log
             writeAuditLog('encrypt', "Encrypted file: $filename -> $newFilename in folder: $currentFolder");
@@ -607,41 +582,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['crypt_action'])) {
             exit;
         }
 
-        // Decrypt the file
-        $result = decryptFile($filePath, $password);
+        // Decrypt to a new file, streamed (I2); the password is checked by decryption (I3)
+        $newFilename = getOriginalFilename($filename);
+        $newPath = $uploadDir . $newFilename;
+        if (file_exists($newPath)) {
+            $newFilename = getUniqueFilename($uploadDir, $newFilename);
+            $newPath = $uploadDir . $newFilename;
+        }
+        $result = decryptFileTo($filePath, $password, $newPath);
 
         if ($result['success']) {
-            // Write decrypted content to new file
-            $newFilename = getOriginalFilename($filename);
-            $newPath = $uploadDir . $newFilename;
-
-            // Check if file already exists
-            if (file_exists($newPath)) {
-                $newFilename = getUniqueFilename($uploadDir, $newFilename);
-                $newPath = $uploadDir . $newFilename;
-            }
-
-            if (file_put_contents($newPath, $result['data']) !== false) {
-                // Delete encrypted file
-                unlink($filePath);
-
-                // Update file metadata
-                renameFileMeta($filename, $newFilename);
-
-                // Remove encryption key
-                removeEncryptionKey($filename);
-
-                // Audit log
-                writeAuditLog('decrypt', "Decrypted file: $filename -> $newFilename in folder: $currentFolder");
-
-                echo json_encode([
-                    'success' => true,
-                    'message' => 'File decrypted successfully',
-                    'newFilename' => $newFilename
-                ]);
-            } else {
-                echo json_encode(['success' => false, 'error' => 'Failed to write decrypted file']);
-            }
+            unlink($filePath);
+            renameFileMeta($filename, $newFilename);
+            removeEncryptionKey($filename, $currentFolder);
+            writeAuditLog('decrypt', "Decrypted file: $filename -> $newFilename in folder: $currentFolder");
+            echo json_encode([
+                'success' => true,
+                'message' => 'File decrypted successfully',
+                'newFilename' => $newFilename
+            ]);
         } else {
             echo json_encode(['success' => false, 'error' => $result['error']]);
         }
@@ -703,7 +662,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['file'])) {
                         $wasEncrypted = true;
 
                         // Store password for recovery
-                        storeEncryptionPassword($finalFilename, $encryptPassword, $currentUser);
+                        storeEncryptionPassword($finalFilename, $encryptPassword, $currentUser, $currentFolder);
                     } else {
                         // Encryption failed, delete the uploaded file
                         unlink($targetPath);
@@ -2324,6 +2283,11 @@ function getRecentChanges($limit = 8) {
         .btn-email:hover {
             background: #1565C0;
         }
+        .share-expiry {
+            margin-left: 4px; padding: 4px 6px; font-size: 12px; border: 1px solid #90a4ae;
+            border-radius: 4px; background: #fff; color: #222; max-width: 100%;
+        }
+        .share-expiry-info { margin-left: 6px; color: #37474f; font-size: 12px; }
         .btn-newid {
             background: #9C27B0;
             color: white;
@@ -2988,6 +2952,14 @@ function getRecentChanges($limit = 8) {
                                         <button class="btn-newid" onclick="regenerateShareLink('<?= htmlspecialchars($file['name'], ENT_QUOTES) ?>', <?= $index ?>, '<?= htmlspecialchars($currentFolder, ENT_QUOTES) ?>')" title="Generate new link (invalidates old)">
                                             New ID
                                         </button>
+                                        <select class="share-expiry" id="expiry-<?= $index ?>" aria-label="Link expiry" title="Link expiry" onchange="setShareExpiry('<?= htmlspecialchars($file['name'], ENT_QUOTES) ?>', <?= $index ?>, '<?= htmlspecialchars($currentFolder, ENT_QUOTES) ?>', this.value)">
+                                            <option value="0">Never expires</option>
+                                            <option value="1">Expires in 1 day</option>
+                                            <option value="7">Expires in 7 days</option>
+                                            <option value="30">Expires in 30 days</option>
+                                            <option value="90">Expires in 90 days</option>
+                                        </select>
+                                        <small class="share-expiry-info" id="expiry-info-<?= $index ?>"></small>
                                     </div>
                                 </td>
                             </tr>
@@ -3262,7 +3234,6 @@ function getRecentChanges($limit = 8) {
                     <div class="help-accordion-content" id="api-content">
                         <?php
                         $userApiKeys = getUserApiKeys($currentUser);
-                        $userApiKey = getUserApiKey($currentUser); // First key for backward compat
                         ?>
 
                         <div class="help-card" style="background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);">
@@ -3378,20 +3349,21 @@ function getRecentChanges($limit = 8) {
                             </div>
                         </div>
 
-                        <?php if ($userApiKey): ?>
+                        <?php if (!empty($userApiKeys)): ?>
                         <div class="help-card">
                             <h3>📥 Windows Right-Click Integration</h3>
                             <p style="color: #666; font-size: 13px; margin-bottom: 15px;">
                                 Download these files to add "Upload to WebShare" to your right-click menu.
+                                The script contains your API key: you will be asked to paste it, because keys are stored hashed and shown only once.
                             </p>
 
                             <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;">
-                                <a href="api-scripts.php?type=bat&key=<?= urlencode($userApiKey) ?>" class="btn" style="background: #607D8B; text-decoration: none; padding: 10px 15px;">
+                                <button type="button" onclick="downloadApiScript('bat')" class="btn" style="background: #607D8B; text-decoration: none; padding: 10px 15px;">
                                     📄 upload-webshare.bat
-                                </a>
-                                <a href="api-scripts.php?type=reg&key=<?= urlencode($userApiKey) ?>" class="btn" style="background: #9C27B0; text-decoration: none; padding: 10px 15px;">
+                                </button>
+                                <button type="button" onclick="downloadApiScript('reg')" class="btn" style="background: #9C27B0; text-decoration: none; padding: 10px 15px;">
                                     📄 add-menu.reg
-                                </a>
+                                </button>
                             </div>
 
                             <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; font-size: 13px;">
@@ -3440,12 +3412,12 @@ function getRecentChanges($limit = 8) {
                             <p style="color: #666; font-size: 13px; margin-bottom: 10px;">
                                 For older Windows without curl, use PowerShell:
                             </p>
-                            <a href="api-scripts.php?type=ps1&key=<?= urlencode($userApiKey) ?>" class="btn" style="background: #1565C0; text-decoration: none; padding: 8px 15px;">
+                            <button type="button" onclick="downloadApiScript('ps1')" class="btn" style="background: #1565C0; text-decoration: none; padding: 8px 15px;">
                                 📄 upload-webshare.ps1
-                            </a>
-                            <a href="api-scripts.php?type=reg-ps1&key=<?= urlencode($userApiKey) ?>" class="btn" style="background: #9C27B0; text-decoration: none; padding: 8px 15px; margin-left: 10px;">
+                            </button>
+                            <button type="button" onclick="downloadApiScript('reg-ps1')" class="btn" style="background: #9C27B0; text-decoration: none; padding: 8px 15px; margin-left: 10px;">
                                 📄 add-menu-ps1.reg
-                            </a>
+                            </button>
                         </div>
                         <?php endif; ?>
 
@@ -3489,6 +3461,12 @@ function getRecentChanges($limit = 8) {
                         <div class="setting-row">
                             <label>Blocked Message:</label>
                             <input type="text" name="geo_message" value="<?= htmlspecialchars($geoConfig['blocked_message'] ?? 'Access denied from your location') ?>">
+                        </div>
+
+                        <div class="setting-row">
+                            <label for="geo_trusted_proxies">Trusted proxies (IPs or CIDRs, comma separated):</label>
+                            <input type="text" id="geo_trusted_proxies" name="geo_trusted_proxies" value="<?= htmlspecialchars(implode(', ', $geoConfig['trusted_proxies'] ?? [])) ?>" placeholder="empty = direct connections only">
+                            <small>Leave empty unless WebShare is behind Cloudflare or a reverse proxy. Only requests coming from these addresses may set the client IP through X-Forwarded-For / CF-Connecting-IP.</small>
                         </div>
 
                         <div class="setting-info">
@@ -3559,7 +3537,7 @@ function getRecentChanges($limit = 8) {
                             <label>Add New User:</label>
                             <div class="user-form-row">
                                 <input type="text" name="new_username" placeholder="Username" aria-label="New username" required pattern="[a-zA-Z0-9_-]{3,20}" autocomplete="off">
-                                <input type="password" name="new_password" placeholder="Password" aria-label="Password for the new user" required minlength="4" autocomplete="new-password">
+                                <input type="password" name="new_password" placeholder="Password" aria-label="Password for the new user" required minlength="8" autocomplete="new-password">
                                 <button type="submit" class="btn-user-add">+ Add</button>
                             </div>
                             <small>Username: 3-20 characters (letters, numbers, - _). Password: min 4 characters.</small>
@@ -3579,7 +3557,7 @@ function getRecentChanges($limit = 8) {
                                         <option value="<?= htmlspecialchars($user) ?>"><?= htmlspecialchars($user) ?></option>
                                     <?php endforeach; ?>
                                 </select>
-                                <input type="password" name="change_password" placeholder="New Password" aria-label="New password" required minlength="4" autocomplete="new-password">
+                                <input type="password" name="change_password" placeholder="New Password" aria-label="New password" required minlength="8" autocomplete="new-password">
                                 <button type="submit" class="btn-user-change">Change</button>
                             </div>
                         </div>
@@ -3738,7 +3716,7 @@ function getRecentChanges($limit = 8) {
                             <thead>
                                 <tr style="text-align:left;border-bottom:2px solid #eee;">
                                     <th style="padding:6px;">Code</th><th style="padding:6px;">Created</th><th style="padding:6px;">Expires</th>
-                                    <th style="padding:6px;">IP</th><th style="padding:6px;">Files</th><th style="padding:6px;">Size</th><th></th>
+                                    <th style="padding:6px;">IP</th><th style="padding:6px;">Files</th><th style="padding:6px;">Size</th><th><span class="sr-only">Actions</span></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -4055,8 +4033,12 @@ systemctl reload apache2</code>
                     <h3>🔑 Change My Password</h3>
                     <form id="changeMyPasswordForm" onsubmit="submitChangeMyPassword(event)" style="max-width: 400px; margin-top: 15px;">
                         <div class="setting-row">
-                            <label>New Password:</label>
-                            <input type="password" id="myNewPassword" placeholder="Min 4 characters" required minlength="4" style="padding: 10px; border: 1px solid #ddd; border-radius: 8px; width: 100%;">
+                            <label for="myCurrentPassword">Current Password:</label>
+                            <input type="password" id="myCurrentPassword" required autocomplete="current-password" style="padding: 10px; border: 1px solid #ddd; border-radius: 8px; width: 100%;">
+                        </div>
+                        <div class="setting-row">
+                            <label for="myNewPassword">New Password:</label>
+                            <input type="password" id="myNewPassword" placeholder="Min 8 characters" required minlength="8" autocomplete="new-password" style="padding: 10px; border: 1px solid #ddd; border-radius: 8px; width: 100%;">
                         </div>
                         <div id="changeMyPasswordMsg" style="display:none; margin: 10px 0;"></div>
                         <button type="submit" class="btn btn-save" style="margin-top:10px;">💾 Change Password</button>
@@ -4343,13 +4325,14 @@ systemctl reload apache2</code>
             fetch('?session_action=change_my_password', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                body: 'csrf_token=' + encodeURIComponent(csrfToken) + '&new_password=' + encodeURIComponent(pw)
+                body: 'csrf_token=' + encodeURIComponent(csrfToken) + '&current_password=' + encodeURIComponent(document.getElementById('myCurrentPassword').value) + '&new_password=' + encodeURIComponent(pw)
             }).then(r => r.json()).then(data => {
                 msgEl.style.display = 'block';
                 if (data.success) {
                     msgEl.style.background = '#e8f5e9'; msgEl.style.color = '#2e7d32'; msgEl.style.padding = '8px 12px'; msgEl.style.borderRadius = '6px';
                     msgEl.textContent = 'Password changed successfully.';
                     document.getElementById('myNewPassword').value = '';
+                    document.getElementById('myCurrentPassword').value = '';
                 } else {
                     msgEl.style.background = '#fee2e2'; msgEl.style.color = '#dc2626'; msgEl.style.padding = '8px 12px'; msgEl.style.borderRadius = '6px';
                     msgEl.textContent = data.error || 'Error changing password.';
@@ -4964,9 +4947,47 @@ systemctl reload apache2</code>
                 if (data.success) {
                     urlInput.value = data.url;
                     shareDiv.style.display = 'block';
+                    showShareExpiry(index, data);
                 }
             } catch (error) {
                 // Silently fail
+            }
+        }
+
+        // I7: link expiry
+        function showShareExpiry(index, data) {
+            const info = document.getElementById('expiry-info-' + index);
+            const sel = document.getElementById('expiry-' + index);
+            if (!info || !sel) return;
+            if (data.expires) {
+                sel.value = String(data.expiry_days || 0);
+                info.textContent = (data.expires < Date.now() / 1000 ? 'expired ' : 'until ') + WS.formatDate(data.expires);
+            } else {
+                info.textContent = '';
+                sel.value = '0';
+            }
+        }
+
+        async function setShareExpiry(filename, index, folder, days) {
+            const formData = new FormData();
+            formData.append('filename', filename);
+            if (folder) formData.append('folder', folder);
+            formData.append('days', days);
+            try {
+                const response = await fetch('share.php?action=set_expiry', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-Token': csrfToken },
+                    body: formData
+                });
+                const data = await response.json();
+                if (data.success) {
+                    showShareExpiry(index, data);
+                    WS.toast(data.expires ? 'Link expires ' + WS.formatDate(data.expires) : 'Link never expires', 'success');
+                } else {
+                    WS.toast(data.error || 'Could not change expiry', 'error');
+                }
+            } catch (e) {
+                WS.toast('Network error', 'error');
             }
         }
 
@@ -4996,6 +5017,7 @@ systemctl reload apache2</code>
                 if (data.success) {
                     urlInput.value = data.url;
                     shareDiv.style.display = 'block';
+                    showShareExpiry(index, data);
 
                     // Visual feedback
                     btn.textContent = 'Done!';
@@ -5058,6 +5080,7 @@ systemctl reload apache2</code>
                 if (data.success) {
                     // Show the new key in modal
                     document.getElementById('newKeyValue').textContent = data.key;
+                    try { sessionStorage.setItem('ws-new-api-key', data.key); } catch (e) {}
                     document.getElementById('newKeyModal').style.display = 'flex';
                     // Clear form
                     document.getElementById('newKeyName').value = '';
@@ -5069,6 +5092,31 @@ systemctl reload apache2</code>
             .catch(error => {
                 WS.toast('Network error: ' + error.message, 'error');
             });
+        }
+
+        // I11: keys are stored hashed. The key from the last generation is kept for
+        // this tab only (sessionStorage) so the scripts can be downloaded right away.
+        async function downloadApiScript(type) {
+            let key = '';
+            try { key = sessionStorage.getItem('ws-new-api-key') || ''; } catch (e) {}
+            key = await WS.confirm({
+                title: 'API key for the script',
+                message: 'The script will contain this key. Keys are shown only once when created; if you do not have it, create a new key.',
+                input: { label: 'API key', value: key },
+                confirmText: 'Download'
+            });
+            if (!key) return;
+            const f = document.createElement('form');
+            f.method = 'POST';
+            f.action = 'api-scripts.php';
+            [['type', type], ['key', key.trim()]].forEach(([n, v]) => {
+                const i = document.createElement('input');
+                i.type = 'hidden'; i.name = n; i.value = v;
+                f.appendChild(i);
+            });
+            document.body.appendChild(f);
+            f.submit();
+            f.remove();
         }
 
         function copyNewKey() {
@@ -5228,8 +5276,8 @@ systemctl reload apache2</code>
 
             // Show update source
             const source = updateData.source || 'unknown';
-            const sourceLabel = source === 'github' ? 'GitHub (stable)' : (source === 'dev' ? 'Dev Server (beta)' : source);
-            const sourceColor = source === 'github' ? '#2E7D32' : '#B45309';
+            const sourceLabel = 'GitHub (stable)';
+            const sourceColor = '#2E7D32';
             html += '<p style="margin: 5px 0; font-size: 11px;"><span style="background: ' + sourceColor + '; color: white; padding: 2px 8px; border-radius: 10px; font-size: 10px;">' + sourceLabel + '</span></p>';
 
             if (updateData.error && !updateData.latest_version) {
@@ -5334,7 +5382,7 @@ systemctl reload apache2</code>
         }
 
         async function doLiveUpdate() {
-            if (!(await WS.confirm({ title: 'Update WebShare now?', message: 'Files will be downloaded from webshare.techbg.net and replaced. A backup is created first.', confirmText: 'Update' }))) return;
+            if (!(await WS.confirm({ title: 'Update WebShare now?', message: 'Files will be downloaded from GitHub (latest stable release) and replaced. A backup is created first.', confirmText: 'Update' }))) return;
 
             const content = document.getElementById('updateContent');
             const liveUpdateBtn = document.getElementById('liveUpdateBtn');
@@ -5405,14 +5453,6 @@ systemctl reload apache2</code>
             const autoCheck = localStorage.getItem('webshare_auto_update_check') !== 'false';
             document.getElementById('autoUpdateCheck').checked = autoCheck;
 
-            // Load beta server preference
-            fetch('?action=get_update_source')
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById('useBetaServer').checked = !data.stable;
-                })
-                .catch(() => {});
-
             if (autoCheck) {
                 // Delay check to not block page load
                 setTimeout(() => checkForUpdates(false), 3000);
@@ -5422,19 +5462,6 @@ systemctl reload apache2</code>
         function toggleAutoUpdateCheck() {
             const checked = document.getElementById('autoUpdateCheck').checked;
             localStorage.setItem('webshare_auto_update_check', checked ? 'true' : 'false');
-        }
-
-        async function toggleBetaServer() {
-            const useBeta = document.getElementById('useBetaServer').checked;
-            try {
-                await fetch('?action=set_update_source', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrfToken },
-                    body: 'use_beta=' + (useBeta ? '1' : '0')
-                });
-            } catch (e) {
-                console.error('Failed to save update source preference');
-            }
         }
 
         // Initialize on page load
@@ -6845,10 +6872,6 @@ systemctl reload apache2</code>
                 <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #666; cursor: pointer;">
                     <input type="checkbox" id="autoUpdateCheck" onchange="toggleAutoUpdateCheck()" checked>
                     Automatically check for updates
-                </label>
-                <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #666; cursor: pointer; margin-top: 8px;">
-                    <input type="checkbox" id="useBetaServer" onchange="toggleBetaServer()">
-                    Use developer server (beta)
                 </label>
             </div>
             <div class="modal-buttons" style="margin-top: 20px;">

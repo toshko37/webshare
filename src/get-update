@@ -1,13 +1,13 @@
 #!/bin/bash
 #
 # WebShare Update Downloader
-# Usage: curl -fsSL https://webshare.techbg.net/get-update | bash
+# Usage: curl -fsSL https://your-webshare-host/get-update | bash  (the update itself comes from GitHub)
 #
 
 set -e
 
 UPDATE_SCRIPT="/tmp/webshare-update-$$.sh"
-SOURCE_URL="https://webshare.techbg.net/installer/update.sh"
+SOURCE_URL="https://raw.githubusercontent.com/toshko37/webshare/main/installer/update.sh"
 
 echo "Downloading WebShare update script..."
 curl -fsSL "$SOURCE_URL" -o "$UPDATE_SCRIPT"

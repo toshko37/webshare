@@ -171,6 +171,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             createSession($username, $rememberMe, $ip, $_SERVER['HTTP_USER_AGENT'] ?? '');
             require_once __DIR__ . '/audit-log.php';
             writeAuditLog('login', "User logged in from $ip");
+            $_SESSION['login_logged'] = $username; // I16: index.php must not log it again
             $dest = ws_safe_redirect($_GET['redirect'] ?? '/');
             if ($dest === '/') $dest = '/?_login=1';
             header('Location: ' . $dest);

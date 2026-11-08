@@ -31,7 +31,6 @@
 ### Updates
 - **Live Update** - One-click update from browser (no SSH needed)
 - **Auto-check** - Automatic version check from GitHub releases
-- **Dual Source** - Check GitHub (stable) or dev server (beta)
 - **Shell Update** - Traditional `./update.sh` script
 
 ## Quick Start
@@ -92,7 +91,6 @@ curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/ge
 | `.htpasswd` | User credentials |
 | `.config.json` | SMTP and site settings |
 | `.geo.json` | GeoIP country filtering |
-| `.update-config.json` | Update source (stable/beta) |
 
 ## Updating
 

@@ -7,6 +7,7 @@
 $tmp = sys_get_temp_dir() . '/ws-sec-unit-' . getmypid();
 @mkdir($tmp);
 define('WS_AUTH_ATTEMPTS_FILE', "$tmp/attempts.json");
+define('WS_AUTH_LOG', "$tmp/no-such-dir/auth.log"); // force the error_log fallback
 ini_set('error_log', "$tmp/php.log");
 require __DIR__ . '/../src/auth-guard.php';
 

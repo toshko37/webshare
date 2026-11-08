@@ -1,7 +1,7 @@
 <?php
 /**
  * WebShare Live Update
- * Downloads and installs updates directly from webshare.techbg.net
+ * Downloads and installs updates from GitHub (raw.githubusercontent.com, main branch)
  * Same source as the shell update script
  */
 
@@ -52,24 +52,10 @@ if (!isAdmin(getCurrentUser())) {
     exit;
 }
 
-// Load update config
-$configFile = __DIR__ . '/.update-config.json';
-$config = ['stable' => true]; // Default: use GitHub
-if (file_exists($configFile)) {
-    $configData = json_decode(file_get_contents($configFile), true);
-    if (isset($configData['stable'])) {
-        $config['stable'] = (bool)$configData['stable'];
-    }
-}
-
-// Source URL based on config
-if ($config['stable']) {
-    // GitHub raw content
-    $sourceUrl = 'https://raw.githubusercontent.com/toshko37/webshare/main/src';
-} else {
-    // Dev server
-    $sourceUrl = 'https://webshare.techbg.net';
-}
+// Updates come only from GitHub (stable releases). The former beta channel
+// (webshare.techbg.net) was removed: that server executes PHP instead of
+// serving its source, see docs/decisions.md D-022/D-023.
+$sourceUrl = 'https://raw.githubusercontent.com/toshko37/webshare/main/src';
 
 // Files to update (same list as update.sh)
 // NOTE: security-check.php, login.php, logout.php are listed FIRST so they're
@@ -186,6 +172,11 @@ try {
         $dest = "$tempDir/$file";
 
         if (downloadFile($url, $dest)) {
+            // A PHP file must arrive as source. A web server that executes it
+            // (e.g. the dev channel) returns HTML; installing that would break the site.
+            if (strncmp(ltrim(file_get_contents($dest, false, null, 0, 64), "\xEF\xBB\xBF"), '<?php', 5) !== 0) {
+                throw new Exception("$file did not arrive as PHP source from $sourceUrl; update aborted, nothing was changed");
+            }
             $downloadedFiles[] = $file;
         } else {
             $result['files_failed'][] = $file;
@@ -199,21 +190,9 @@ try {
         downloadFile($url, $dest); // Optional files, don't fail if missing
     }
 
-    // Download .htaccess (GitHub: .htaccess, Dev: htaccess.txt)
-    $htaccessUrl = $config['stable'] ? "$sourceUrl/.htaccess" : "$sourceUrl/htaccess.txt";
-    if (downloadFile($htaccessUrl, "$tempDir/.htaccess")) {
-        // Update AuthUserFile path if using dev server version
-        if (!$config['stable']) {
-            $htaccessContent = file_get_contents("$tempDir/.htaccess");
-            $installRoot = dirname($installDir); // Go up from src/ to root
-            $htaccessContent = str_replace('__HTPASSWD_PATH__', "$installRoot/.htpasswd", $htaccessContent);
-            file_put_contents("$tempDir/.htaccess", $htaccessContent);
-        }
-    }
-
-    // Download .user.ini (GitHub: .user.ini, Dev: user.ini.txt)
-    $userIniUrl = $config['stable'] ? "$sourceUrl/.user.ini" : "$sourceUrl/user.ini.txt";
-    downloadFile($userIniUrl, "$tempDir/.user.ini");
+    // .htaccess is tracked as is; .user.ini is tracked as user.ini.txt (dotfile is git-ignored)
+    downloadFile("$sourceUrl/.htaccess", "$tempDir/.htaccess");
+    downloadFile("$sourceUrl/user.ini.txt", "$tempDir/.user.ini");
 
     $result['steps'][count($result['steps'])-1]['status'] = 'done';
     $result['steps'][count($result['steps'])-1]['detail'] = count($downloadedFiles) . ' files downloaded';

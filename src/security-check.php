@@ -142,8 +142,8 @@ function _sc_handleMigration($htUsers) {
     $users = [];
     foreach ($htUsers as $i => $user) {
         $pass = $_POST['pass_' . $user] ?? '';
-        if (strlen($pass) < 4) {
-            _sc_renderMigrationForm($htUsers, "Паролата за \"$user\" трябва да е поне 4 символа.");
+        if (strlen($pass) < 8) {
+            _sc_renderMigrationForm($htUsers, "Паролата за \"$user\" трябва да е поне 8 символа.");
             return;
         }
         $users[$user] = [
@@ -166,8 +166,8 @@ function _sc_handleFirstRun() {
         _sc_renderSetupForm('Невалидно потребителско име (3-20 знака, a-z 0-9 - _)');
         return;
     }
-    if (strlen($password) < 4) {
-        _sc_renderSetupForm('Паролата трябва да е поне 4 символа.');
+    if (strlen($password) < 8) {
+        _sc_renderSetupForm('Паролата трябва да е поне 8 символа.');
         return;
     }
     $users = [$username => [
@@ -219,7 +219,7 @@ function _sc_renderMigrationForm($users, $error = '') {
     foreach ($users as $u) {
         echo '<div class="user-block"><strong>👤 ' . htmlspecialchars($u) . '</strong>';
         echo '<div class="group"><label>Нова парола</label>';
-        echo '<input type="password" name="pass_' . htmlspecialchars($u) . '" required minlength="4" placeholder="Минимум 4 знака"></div></div>';
+        echo '<input type="password" name="pass_' . htmlspecialchars($u) . '" required minlength="8" placeholder="Минимум 8 знака"></div></div>';
     }
     echo '<button class="btn" type="submit">Завърши миграцията →</button></form></div></body></html>';
 }
@@ -233,6 +233,6 @@ function _sc_renderSetupForm($error = '') {
     echo '<div class="group"><label>Потребителско Име</label>';
     echo '<input type="text" name="username" value="' . htmlspecialchars($_POST['username'] ?? '') . '" required autofocus pattern="[a-zA-Z0-9_-]{3,20}"></div>';
     echo '<div class="group"><label>Парола</label>';
-    echo '<input type="password" name="password" required minlength="4"></div>';
+    echo '<input type="password" name="password" required minlength="8"></div>';
     echo '<button class="btn" type="submit">Създай акаунт →</button></form></div></body></html>';
 }

@@ -34,12 +34,17 @@ U1, U8, U12 и U13 са поправени по-рано, виж одита.
 
 ### Ред за fail2ban
 
+От 2026-11-08 (D-021) редът се пише в `logs/auth.log` до `src/`, ако папката съществува, иначе в PHP лога:
+
 ```
-[08-Nov-2026 21:47:18 Europe/Sofia] WebShare auth failure: where=login ip=192.168.22.1
+2026-11-08 22:48:34 WebShare auth failure: where=login ip=192.168.22.1
 ```
+
+На този сървър jail-ът `[webshare]` в `jail.local` е насочен към `/var/www/webshare/logs/auth.log`. За нови инсталации `installer/harden.sh` създава `jail.d/webshare.conf`.
 
 - **Стойности на `where`:**
   - `login` и `login-locked` (опит по време на блокировка);
+  - `own-password` и `own-password-locked` (смяна на собствената парола, I8);
   - `share-password` и `share-password-locked`;
   - `file-password` и `file-password-locked`.
 - **Защита на формата.** Обхватът се почиства до `[a-z0-9_-]`, а IP се валидира, така че в лога не може да се инжектира фалшив ред.
@@ -67,4 +72,4 @@ curl -skI https://webshare.techbg.net/ | grep -i x-robots-tag
 
 ## Други инсталации
 
-Live update и обновяването от tarball носят `auth-guard.php`, `robots.txt` и `.htaccess`. fail2ban, правата и архивирането са настройки на сървъра. Те не се прилагат от обновяването. За другите инсталации трябва да се добавят в инсталатора, което е отделна задача.
+Live update и обновяването от tarball носят `auth-guard.php`, `robots.txt` и `.htaccess`. Правата, fail2ban, ротацията и архивирането се настройват от `installer/harden.sh`. Той се пуска от `get-webshare.sh`, `install.sh`, `update.sh` и `update-remote.sh`, а може и ръчно: `sudo installer/harden.sh /var/www/webshare`. Виж D-021.
