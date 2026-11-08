@@ -80,6 +80,8 @@ $phpFiles = [
     'logout.php',
     'index.php',
     'upload.php',
+    'upload-guard.php',
+    'error-page.php',
     'public.php',
     'download.php',
     't.php',
@@ -110,6 +112,8 @@ $phpFiles = [
 ];
 
 $otherFiles = [
+    'ui-kit.css',
+    'ui-kit.js',
     'favicon.ico',
     'favicon.svg',
     'apple-touch-icon.png',

@@ -13,6 +13,7 @@ define('SITE_CONFIG_FILE', __DIR__ . '/.config.json');
 
 // Include audit log system
 require_once __DIR__ . '/audit-log.php';
+require_once __DIR__ . '/error-page.php';
 
 // Load site config
 function loadSiteConfig() {
@@ -177,30 +178,26 @@ $action = $_GET['action'] ?? '';
 
 // Validate token
 if (empty($token) || !preg_match('/^[a-zA-Z0-9]{6,64}$/', $token)) {
-    http_response_code(404);
-    die('Invalid folder share link');
+    wsErrorPage(404, 'Невалиден линк', 'Линкът към папката е непълен или сгрешен.');
 }
 
 // Load share data
 $shares = loadFolderShares();
 if (!isset($shares[$token])) {
-    http_response_code(404);
-    die('Folder share not found or expired');
+    wsErrorPage(404, 'Папката не е намерена', 'Споделянето е премахнато или линкът е сгрешен. Поискай нов линк.');
 }
 
 $share = $shares[$token];
 
 // Check expiration
 if (!empty($share['expires']) && $share['expires'] < time()) {
-    http_response_code(410);
-    die('This folder share has expired');
+    wsErrorPage(410, 'Линкът е изтекъл', 'Срокът на споделянето е изтекъл. Поискай нов линк.');
 }
 
 // Get folder path
 $folderPath = UPLOADS_DIR . $share['folder'];
 if (!is_dir($folderPath)) {
-    http_response_code(404);
-    die('Folder not found');
+    wsErrorPage(404, 'Папката липсва', 'Папката е изтрита или преместена.');
 }
 
 $folderName = basename($share['folder']);
@@ -245,8 +242,7 @@ if ($action === 'file' && $isAuthenticated && isset($_GET['path'])) {
         readfile($fullPath);
         exit;
     }
-    http_response_code(404);
-    die('File not found');
+    wsErrorPage(404, 'Файлът липсва', 'Файлът е изтрит или преместен.');
 }
 
 // Handle ZIP download
@@ -262,8 +258,7 @@ if ($action === 'download' && $isAuthenticated) {
         unlink($zipFile);
         exit;
     }
-    http_response_code(500);
-    die('Failed to create ZIP');
+    wsErrorPage(500, 'Архивът не можа да се създаде', 'Опитай отново или изтегли файловете един по един.');
 }
 
 // Handle file upload
@@ -370,7 +365,7 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
         }
@@ -385,7 +380,7 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
         }
 
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
             padding: 30px;
             text-align: center;
@@ -432,13 +427,13 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
 
         .password-form input[type="password"]:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #4C51BF;
         }
 
         .password-form button {
             width: 100%;
             padding: 15px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
             border: none;
             border-radius: 8px;
@@ -452,7 +447,7 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
         }
 
         .error-msg {
-            color: #e74c3c;
+            color: #C62828;
             margin-bottom: 15px;
         }
 
@@ -468,7 +463,7 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
         }
 
         .upload-zone:hover, .upload-zone.dragover {
-            border-color: #667eea;
+            border-color: #4C51BF;
             background: rgba(102, 126, 234, 0.05);
         }
 
@@ -493,7 +488,7 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
         .btn {
             display: inline-block;
             padding: 12px 24px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
             border: none;
             border-radius: 8px;
@@ -519,7 +514,7 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
         }
 
         .btn-danger {
-            background: #e74c3c;
+            background: #C62828;
         }
 
         .btn-sm {
@@ -576,7 +571,7 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
 
         .file-meta {
             font-size: 12px;
-            color: #888;
+            color: #6B6B6B;
             margin-top: 3px;
         }
 
@@ -624,7 +619,7 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
 
         .progress-bar-fill {
             height: 100%;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             width: 0%;
             transition: width 0.3s;
         }
@@ -640,7 +635,7 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
         .empty-state {
             text-align: center;
             padding: 60px 20px;
-            color: #888;
+            color: #6B6B6B;
         }
 
         .empty-state-icon {
@@ -674,7 +669,7 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
         }
 
         .toast.error {
-            background: #e74c3c;
+            background: #C62828;
         }
 
         @media (max-width: 600px) {
@@ -708,10 +703,15 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
                 align-items: stretch;
             }
         }
+        @media (max-width: 600px) {
+            .file-name { white-space: normal; overflow-wrap: anywhere; }
+        }
     </style>
+    <link rel="stylesheet" href="/ui-kit.css?v=<?= (int)@filemtime(__DIR__ . '/ui-kit.css') ?>">
+    <script src="/ui-kit.js?v=<?= (int)@filemtime(__DIR__ . '/ui-kit.js') ?>" defer></script>
 </head>
 <body>
-    <div class="container">
+    <div class="container" role="main">
         <div class="header">
             <h1>📁 <?= htmlspecialchars($folderName) ?></h1>
             <p>Споделена папка</p>
@@ -788,7 +788,7 @@ $siteName = $siteConfig['site_name'] ?? 'WebShare';
                             <?= $item['type'] === 'folder' ? '📁' : getFileIcon($item['name']) ?>
                         </div>
                         <div class="file-info">
-                            <div class="file-name"><?= htmlspecialchars($item['name']) ?></div>
+                            <div class="file-name" title="<?= htmlspecialchars($item['name']) ?>"><?= htmlspecialchars($item['name']) ?></div>
                             <?php if ($item['type'] === 'file'): ?>
                             <div class="file-meta">
                                 <?= formatFileSize($item['size']) ?> · <?= date('d.m.Y H:i', $item['modified']) ?>

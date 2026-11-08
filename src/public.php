@@ -7,6 +7,7 @@
 require_once __DIR__ . '/audit-log.php';
 require_once __DIR__ . '/encryption.php';
 require_once __DIR__ . '/folder-management.php';
+require_once __DIR__ . '/error-page.php';
 
 $tokensFile = __DIR__ . '/.tokens.json';
 $filesDir = __DIR__ . '/files/';
@@ -15,8 +16,7 @@ $filesDir = __DIR__ . '/files/';
 $token = $_GET['t'] ?? '';
 
 if (empty($token)) {
-    http_response_code(400);
-    die('Invalid share link');
+    wsErrorPage(400, 'Невалиден линк', 'Линкът е непълен. Провери дали си го копирал целия.');
 }
 
 // Load tokens
@@ -32,8 +32,7 @@ $tokens = loadTokens($tokensFile);
 
 // Validate token
 if (!isset($tokens[$token])) {
-    http_response_code(404);
-    die('Share link not found or expired');
+    wsErrorPage(404, 'Линкът не е намерен', 'Споделянето е премахнато или линкът е сгрешен. Поискай нов линк от човека, който ти го е пратил.');
 }
 
 $fileData = $tokens[$token];
@@ -50,16 +49,14 @@ if (isset($fileData['folder']) && !empty($fileData['folder'])) {
 
 // Security check: ensure file exists and is within the files directory
 if (!file_exists($filePath) || !is_file($filePath)) {
-    http_response_code(404);
-    die('File not found');
+    wsErrorPage(404, 'Файлът липсва', 'Файлът е изтрит или преместен. Поискай нов линк.');
 }
 
 // Security check: prevent directory traversal
 $realPath = realpath($filePath);
 $realDir = realpath($filesDir);
 if (strpos($realPath, $realDir) !== 0) {
-    http_response_code(403);
-    die('Access denied');
+    wsErrorPage(403, 'Достъпът е отказан', 'Този линк не дава достъп до файла.');
 }
 
 // Check if file is encrypted

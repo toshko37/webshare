@@ -42,6 +42,9 @@ $maxFileSize = 10 * 1024 * 1024 * 1024; // 10GB in bytes
 // Include geo functions
 require_once __DIR__ . '/geo-check.php';
 
+// Upload guard (anonymous upload regulation, docs/upload-guard.md)
+require_once __DIR__ . '/upload-guard.php';
+
 // Include user management (includes folder-management.php)
 require_once __DIR__ . '/user-management.php';
 
@@ -163,10 +166,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_mail']) && $isAd
 // Handle public access settings save (admin only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_access']) && $isAdmin) {
     $siteConfig['open_chat'] = isset($_POST['open_chat']);
-    $siteConfig['open_upload'] = isset($_POST['open_upload']);
-    file_put_contents($siteConfigFile, json_encode($siteConfig, JSON_PRETTY_PRINT));
-    writeAuditLog('settings', "Access settings updated: open_chat=" . ($siteConfig['open_chat'] ? 'yes' : 'no') . ", open_upload=" . ($siteConfig['open_upload'] ? 'yes' : 'no'));
+
+    // Upload mode: verified | open | login (open_upload kept in sync for older code)
+    $guardSaved = ug_sanitize_config(['mode' => $_POST['upload_mode'] ?? 'verified'], ug_config($siteConfig));
+    unset($guardSaved['provider_effective']);
+    $siteConfig['upload_guard'] = $guardSaved;
+    $siteConfig['open_upload'] = $guardSaved['mode'] !== 'login';
+
+    if (file_put_contents($siteConfigFile, json_encode($siteConfig, JSON_PRETTY_PRINT), LOCK_EX) === false) {
+        header('Location: /?tab=settings&user_msg=' . urlencode('ERROR: cannot write .config.json (check file owner)'));
+        exit;
+    }
+    ug_sync_flags(ug_config($siteConfig));
+    writeAuditLog('settings', "Access settings updated: open_chat=" . ($siteConfig['open_chat'] ? 'yes' : 'no') . ", upload_mode=" . $guardSaved['mode']);
     header('Location: /?tab=settings&user_msg=Access settings saved');
+    exit;
+}
+
+// Handle upload guard limits save (admin only)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_upload_guard']) && $isAdmin) {
+    $in = $_POST;
+    // Unchecked checkboxes are not submitted - set them explicitly
+    foreach (['curl_without_pass', 'block_dangerous', 'notify_owner'] as $b) {
+        $in[$b] = isset($_POST[$b]);
+    }
+    $guardSaved = ug_sanitize_config($in, ug_config($siteConfig));
+    unset($guardSaved['provider_effective']);
+    $siteConfig['upload_guard'] = $guardSaved;
+    if (file_put_contents($siteConfigFile, json_encode($siteConfig, JSON_PRETTY_PRINT), LOCK_EX) === false) {
+        header('Location: /?tab=settings&user_msg=' . urlencode('ERROR: cannot write .config.json (check file owner)'));
+        exit;
+    }
+    ug_sync_flags(ug_config($siteConfig));
+    $logged = $guardSaved;
+    $logged['turnstile_secret'] = $logged['turnstile_secret'] !== '' ? '***' : '';
+    writeAuditLog('settings', 'Upload guard updated: ' . json_encode($logged));
+    header('Location: /?tab=settings&user_msg=Upload protection saved');
+    exit;
+}
+
+// Revoke an upload pass (admin only)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['revoke_upload_pass']) && $isAdmin) {
+    $revoked = ug_revoke_pass($_POST['revoke_upload_pass']);
+    if ($revoked) {
+        writeAuditLog('upload_pass_revoked', 'Pass ' . ug_format_code($revoked['code']) . ' revoked (' . count($revoked['files']) . ' files uploaded, IP ' . $revoked['ip'] . ')');
+    }
+    header('Location: /?tab=settings&user_msg=' . urlencode($revoked ? 'Upload pass revoked' : 'Pass not found'));
     exit;
 }
 
@@ -197,6 +242,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['user_action']) && $is
             break;
 
         case 'delete':
+            if (($_POST['delete_username'] ?? '') === $currentUser) {
+                $redirectErr = 'You cannot delete your own account';
+                break;
+            }
             $result = deleteUser($_POST['delete_username'] ?? '');
             if ($result['success']) {
                 writeAuditLog('user_delete', "Deleted user: " . $_POST['delete_username']);
@@ -1164,6 +1213,8 @@ function getRecentChanges($limit = 8) {
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="stylesheet" href="ui-kit.css?v=<?= urlencode(WEBSHARE_VERSION) ?>">
+    <script src="ui-kit.js?v=<?= urlencode(WEBSHARE_VERSION) ?>" defer></script>
 
     <!-- Quill.js Rich Text Editor -->
     <link href="assets/quill/quill.snow.css" rel="stylesheet">
@@ -1188,7 +1239,7 @@ function getRecentChanges($limit = 8) {
             position: absolute;
             top: 20px;
             right: 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
             padding: 8px 16px;
             border-radius: 6px;
@@ -1226,10 +1277,10 @@ function getRecentChanges($limit = 8) {
         }
         .disk-usage-fill {
             height: 100%;
-            background: #4CAF50;
+            background: #2E7D32;
         }
-        .disk-usage.warn .disk-usage-fill { background: #ff9800; }
-        .disk-usage.critical .disk-usage-fill { background: #f44336; }
+        .disk-usage.warn .disk-usage-fill { background: #B45309; }
+        .disk-usage.critical .disk-usage-fill { background: #C62828; }
         .disk-usage.critical { color: #d32f2f; font-weight: 600; }
         .current-user {
             color: #666;
@@ -1283,15 +1334,15 @@ function getRecentChanges($limit = 8) {
             transition: all 0.3s;
         }
         .upload-section:hover {
-            border-color: #4CAF50;
+            border-color: #2E7D32;
             background: #f1f8f4;
         }
         .upload-section.drag-over {
-            border-color: #4CAF50;
+            border-color: #2E7D32;
             background: #e8f5e9;
         }
         .btn {
-            background: #4CAF50;
+            background: #2E7D32;
             color: white;
             padding: 12px 30px;
             border: none;
@@ -1301,10 +1352,10 @@ function getRecentChanges($limit = 8) {
             transition: background 0.3s;
         }
         .btn:hover {
-            background: #45a049;
+            background: #1B5E20;
         }
         .btn-danger {
-            background: #f44336;
+            background: #C62828;
             padding: 6px 12px;
             font-size: 14px;
             text-decoration: none;
@@ -1312,7 +1363,7 @@ function getRecentChanges($limit = 8) {
             margin-left: 5px;
         }
         .btn-danger:hover {
-            background: #da190b;
+            background: #B71C1C;
         }
         .file-select-col {
             width: 32px;
@@ -1343,7 +1394,7 @@ function getRecentChanges($limit = 8) {
             cursor: not-allowed;
         }
         .btn-share {
-            background: #2196F3;
+            background: #1565C0;
             padding: 6px 12px;
             font-size: 14px;
             text-decoration: none;
@@ -1354,7 +1405,7 @@ function getRecentChanges($limit = 8) {
             border-radius: 4px;
         }
         .btn-share:hover {
-            background: #0b7dda;
+            background: #0D47A1;
         }
         .btn-ext {
             background: #9C27B0;
@@ -1386,7 +1437,7 @@ function getRecentChanges($limit = 8) {
             white-space: nowrap;
         }
         .btn-rename {
-            background: #FF9800;
+            background: #B45309;
             padding: 6px 12px;
             font-size: 14px;
             text-decoration: none;
@@ -1398,7 +1449,7 @@ function getRecentChanges($limit = 8) {
             margin-left: 5px;
         }
         .btn-rename:hover {
-            background: #F57C00;
+            background: #9A3412;
         }
         .tabs {
             display: flex;
@@ -1418,11 +1469,11 @@ function getRecentChanges($limit = 8) {
             transition: all 0.3s;
         }
         .tab:hover {
-            color: #4CAF50;
+            color: #2E7D32;
         }
         .tab.active {
-            color: #4CAF50;
-            border-bottom-color: #4CAF50;
+            color: #2E7D32;
+            border-bottom-color: #2E7D32;
         }
         .tab-content {
             display: none;
@@ -1454,12 +1505,12 @@ function getRecentChanges($limit = 8) {
             transition: all 0.2s;
         }
         .folder-btn:hover {
-            border-color: #4CAF50;
+            border-color: #2E7D32;
             background: #f0fff0;
         }
         .folder-btn.active {
-            background: #4CAF50;
-            border-color: #4CAF50;
+            background: #2E7D32;
+            border-color: #2E7D32;
             color: white;
         }
         .folder-btn .badge {
@@ -1469,7 +1520,7 @@ function getRecentChanges($limit = 8) {
             border-radius: 4px;
         }
         .folder-btn.active .badge {
-            background: rgba(255,255,255,0.3);
+            background: rgba(0,0,0,0.3);
         }
         /* Breadcrumb */
         .breadcrumb {
@@ -1484,10 +1535,10 @@ function getRecentChanges($limit = 8) {
             font-size: 14px;
         }
         .breadcrumb-sep {
-            color: #999;
+            color: #6B6B6B;
         }
         .breadcrumb-link {
-            color: #2196F3;
+            color: #1565C0;
             text-decoration: none;
         }
         .breadcrumb-link:hover {
@@ -1500,7 +1551,7 @@ function getRecentChanges($limit = 8) {
         .btn-share-current {
             margin-left: auto;
             padding: 5px 12px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
             border: none;
             border-radius: 4px;
@@ -1548,7 +1599,7 @@ function getRecentChanges($limit = 8) {
             font-weight: 500;
         }
         .subfolder-link:hover {
-            color: #2196F3;
+            color: #1565C0;
         }
         .subfolder-actions {
             display: flex;
@@ -1570,7 +1621,7 @@ function getRecentChanges($limit = 8) {
         }
         .btn-small {
             padding: 6px 12px;
-            background: #4CAF50;
+            background: #2E7D32;
             color: white;
             border: none;
             border-radius: 4px;
@@ -1578,10 +1629,10 @@ function getRecentChanges($limit = 8) {
             font-size: 12px;
         }
         .btn-small:hover {
-            background: #45a049;
+            background: #1B5E20;
         }
         .no-subfolders {
-            color: #999;
+            color: #6B6B6B;
             font-size: 13px;
             margin: 0;
         }
@@ -1608,7 +1659,7 @@ function getRecentChanges($limit = 8) {
         .encrypt-checkbox input {
             width: 18px;
             height: 18px;
-            accent-color: #667eea;
+            accent-color: #4C51BF;
         }
         .collapse-btn {
             background: none;
@@ -1616,7 +1667,7 @@ function getRecentChanges($limit = 8) {
             cursor: pointer;
             padding: 5px 10px;
             font-size: 14px;
-            color: #667eea;
+            color: #4C51BF;
             border-radius: 4px;
             transition: all 0.2s;
         }
@@ -1646,11 +1697,11 @@ function getRecentChanges($limit = 8) {
         }
         #encryptPasswordFields input:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #4C51BF;
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
         }
         #encryptPasswordFields input.valid {
-            border-color: #28a745;
+            border-color: #1E7E34;
             background: #f0fff4;
             box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.15);
         }
@@ -1689,7 +1740,7 @@ function getRecentChanges($limit = 8) {
         }
         .web-download-toggle {
             cursor: pointer;
-            color: #667eea;
+            color: #4C51BF;
             font-size: 14px;
             padding: 8px;
             transition: all 0.2s;
@@ -1719,7 +1770,7 @@ function getRecentChanges($limit = 8) {
         }
         .web-download-input-group input:focus {
             outline: none;
-            border-color: #667eea;
+            border-color: #4C51BF;
             box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
         .web-download-file-info {
@@ -1803,14 +1854,14 @@ function getRecentChanges($limit = 8) {
             transform: scale(1.1);
         }
         .btn-decrypt-action {
-            background: #28a745;
+            background: #1E7E34;
         }
         .btn-decrypt-action:hover {
-            background: #218838;
+            background: #155724;
         }
         /* Move button */
         .btn-move {
-            background: #2196F3;
+            background: #1565C0;
             color: white;
             border: none;
             padding: 6px 12px;
@@ -1819,7 +1870,7 @@ function getRecentChanges($limit = 8) {
             font-size: 12px;
         }
         .btn-move:hover {
-            background: #1976D2;
+            background: #1565C0;
         }
         /* Move modal */
         .modal {
@@ -1848,7 +1899,7 @@ function getRecentChanges($limit = 8) {
             margin-bottom: 20px;
         }
         .changelog-version { margin-bottom: 20px; }
-        .changelog-version h4 { color: #1976D2; margin-bottom: 10px; border-bottom: 1px solid #e0e0e0; padding-bottom: 5px; }
+        .changelog-version h4 { color: #1565C0; margin-bottom: 10px; border-bottom: 1px solid #e0e0e0; padding-bottom: 5px; }
         .changelog-version ul { margin: 0; padding-left: 20px; }
         .changelog-version li { margin: 5px 0; color: #555; }
         .changelog-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; margin-left: 8px; }
@@ -1866,11 +1917,11 @@ function getRecentChanges($limit = 8) {
             transition: all 0.2s;
         }
         .folder-option:hover {
-            border-color: #4CAF50;
+            border-color: #2E7D32;
             background: #f0fff0;
         }
         .folder-option.selected {
-            border-color: #4CAF50;
+            border-color: #2E7D32;
             background: #e8f5e9;
         }
         .modal-buttons {
@@ -1884,7 +1935,7 @@ function getRecentChanges($limit = 8) {
             transition: all 0.3s;
         }
         #cryptModal input[type="password"].valid {
-            border-color: #28a745 !important;
+            border-color: #1E7E34 !important;
             background: #f0fff4 !important;
             box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.15);
         }
@@ -1958,7 +2009,7 @@ function getRecentChanges($limit = 8) {
         .setting-row small {
             display: block;
             margin-top: 5px;
-            color: #888;
+            color: #6B6B6B;
             font-size: 12px;
         }
         .setting-info {
@@ -1968,7 +2019,8 @@ function getRecentChanges($limit = 8) {
             margin-top: 15px;
             font-size: 14px;
         }
-        .toggle {
+        .toggle,
+        .setting-row label.toggle {
             display: flex;
             align-items: center;
             cursor: pointer;
@@ -1978,6 +2030,8 @@ function getRecentChanges($limit = 8) {
             display: none;
         }
         .toggle-slider {
+            display: inline-block;
+            flex-shrink: 0;
             width: 70px;
             height: 32px;
             background: #dc3545;
@@ -2005,13 +2059,13 @@ function getRecentChanges($limit = 8) {
             color: #dc3545;
         }
         .toggle input:checked + .toggle-slider {
-            background: #28a745;
+            background: #1E7E34;
             border-color: #1e7e34;
         }
         .toggle input:checked + .toggle-slider:before {
             left: 38px;
             content: 'ON';
-            color: #28a745;
+            color: #1E7E34;
         }
         .toggle-label {
             font-weight: 600;
@@ -2054,7 +2108,7 @@ function getRecentChanges($limit = 8) {
             color: #333;
         }
         .user-badge {
-            background: #4CAF50;
+            background: #2E7D32;
             color: white;
             padding: 2px 6px;
             border-radius: 3px;
@@ -2094,7 +2148,7 @@ function getRecentChanges($limit = 8) {
             width: 180px;
         }
         .btn-user-add {
-            background: #28a745;
+            background: #1E7E34;
             color: white;
             border: none;
             padding: 10px 20px;
@@ -2103,7 +2157,7 @@ function getRecentChanges($limit = 8) {
             font-weight: 600;
         }
         .btn-user-add:hover {
-            background: #218838;
+            background: #155724;
         }
         .btn-user-change {
             background: #ffc107;
@@ -2122,7 +2176,7 @@ function getRecentChanges($limit = 8) {
             font-size: 13px;
         }
         .btn-save {
-            background: #4CAF50;
+            background: #2E7D32;
             color: white;
             padding: 12px 24px;
             border: none;
@@ -2141,7 +2195,7 @@ function getRecentChanges($limit = 8) {
         }
         .char-counter {
             text-align: right;
-            color: #999;
+            color: #6B6B6B;
             font-size: 13px;
             margin-bottom: 15px;
         }
@@ -2182,21 +2236,21 @@ function getRecentChanges($limit = 8) {
             border: none;
             border-radius: 4px;
             cursor: pointer;
-            background: #2196F3;
+            background: #1565C0;
             color: white;
             text-decoration: none;
             font-weight: 500;
         }
-        .btn-sm:hover { background: #1976D2; }
-        .btn-sm.btn-edit { background: #FF9800; }
-        .btn-sm.btn-edit:hover { background: #F57C00; }
-        .btn-sm.btn-del { background: #e53935; padding: 6px 10px; }
+        .btn-sm:hover { background: #1565C0; }
+        .btn-sm.btn-edit { background: #B45309; }
+        .btn-sm.btn-edit:hover { background: #9A3412; }
+        .btn-sm.btn-del { background: #C62828; padding: 6px 10px; }
         .btn-sm.btn-del:hover { background: #c62828; }
         .text-row-bottom {
             display: flex;
             gap: 12px;
             font-size: 12px;
-            color: #888;
+            color: #6B6B6B;
             align-items: center;
         }
         .extend-btns { margin-left: 2px; }
@@ -2211,7 +2265,7 @@ function getRecentChanges($limit = 8) {
             justify-content: space-between;
             align-items: center;
             font-size: 13px;
-            color: #999;
+            color: #6B6B6B;
             margin-bottom: 10px;
         }
         .text-actions {
@@ -2235,7 +2289,7 @@ function getRecentChanges($limit = 8) {
             font-size: 12px;
         }
         .btn-copy {
-            background: #FF9800;
+            background: #B45309;
             color: white;
             border: none;
             padding: 4px 10px;
@@ -2245,10 +2299,10 @@ function getRecentChanges($limit = 8) {
             font-size: 12px;
         }
         .btn-copy:hover {
-            background: #F57C00;
+            background: #9A3412;
         }
         .btn-email {
-            background: #2196F3;
+            background: #1565C0;
             color: white;
             border: none;
             padding: 4px 10px;
@@ -2258,7 +2312,7 @@ function getRecentChanges($limit = 8) {
             margin-left: 5px;
         }
         .btn-email:hover {
-            background: #1976D2;
+            background: #1565C0;
         }
         .btn-newid {
             background: #9C27B0;
@@ -2300,7 +2354,7 @@ function getRecentChanges($limit = 8) {
         }
         .progress-bar {
             height: 100%;
-            background: linear-gradient(90deg, #4CAF50 0%, #45a049 100%);
+            background: linear-gradient(90deg, #2E7D32 0%, #1B5E20 100%);
             width: 0%;
             transition: width 0.3s ease;
             display: flex;
@@ -2326,7 +2380,7 @@ function getRecentChanges($limit = 8) {
             color: #333;
         }
         .btn-stop {
-            background: #f44336;
+            background: #C62828;
             color: white;
             padding: 10px 30px;
             border: none;
@@ -2338,7 +2392,7 @@ function getRecentChanges($limit = 8) {
             transition: all 0.3s;
         }
         .btn-stop:hover {
-            background: #da190b;
+            background: #B71C1C;
             transform: translateY(-2px);
         }
         /* Files section header with shortcuts */
@@ -2350,7 +2404,7 @@ function getRecentChanges($limit = 8) {
             align-items: center;
             gap: 15px;
             margin-bottom: 20px;
-            border-bottom: 2px solid #4CAF50;
+            border-bottom: 2px solid #2E7D32;
             padding-bottom: 10px;
         }
         .files-header-row h2 {
@@ -2384,7 +2438,7 @@ function getRecentChanges($limit = 8) {
             border-color: #ccc;
         }
         .folder-shortcut.active {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
             border-color: transparent;
         }
@@ -2409,7 +2463,7 @@ function getRecentChanges($limit = 8) {
             background: #f9f9f9;
         }
         .file-name {
-            color: #2196F3;
+            color: #1565C0;
             text-decoration: none;
             font-weight: 500;
         }
@@ -2419,7 +2473,7 @@ function getRecentChanges($limit = 8) {
         .no-files {
             text-align: center;
             padding: 40px;
-            color: #999;
+            color: #6B6B6B;
         }
         .upload-info {
             margin-top: 15px;
@@ -2440,7 +2494,7 @@ function getRecentChanges($limit = 8) {
         .help-accordion-btn {
             width: 100%;
             padding: 16px 20px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
             border: none;
             cursor: pointer;
@@ -2480,7 +2534,7 @@ function getRecentChanges($limit = 8) {
         .help-card:last-child {
             margin-bottom: 0;
         }
-        .help-card h4 {
+        .help-card h3 {
             margin: 0 0 12px 0;
             color: #333;
             font-size: 14px;
@@ -2531,12 +2585,63 @@ function getRecentChanges($limit = 8) {
         .copy-btn.copied {
             background: #22c55e;
         }
+
+        /* ── Mobile layout (UI/UX audit X1, docs/ui-ux-plan.md) ── */
+        .select-all-label { display: none; }
+        .drop-title { font-size: 18px; color: #333; margin-bottom: 8px; }
+        @media (max-width: 860px) {
+            body { padding: 0; }
+            .container { padding: 16px; border-radius: 0; box-shadow: none; }
+            .speed-link, .user-header { position: static; }
+            .speed-link { display: inline-block; margin-bottom: 10px; }
+            .user-header { flex-wrap: wrap; gap: 8px 14px; margin-bottom: 14px; }
+            h1 { font-size: 26px; }
+            .tabs { overflow-x: auto; flex-wrap: nowrap; gap: 0; scrollbar-width: none; -webkit-overflow-scrolling: touch; margin-bottom: 20px; }
+            .tabs::-webkit-scrollbar { display: none; }
+            .tab { padding: 12px 14px; white-space: nowrap; flex: 0 0 auto; min-height: 44px; }
+            .folder-nav { padding: 10px; }
+            .folder-btn, .subfolder-item { min-height: 44px; }
+            .upload-section { padding: 24px 14px !important; }
+
+            /* Files table becomes a list of cards */
+            #files-table, #files-table thead, #files-table tbody, #files-table tr, #files-table th, #files-table td { display: block; width: 100%; }
+            #files-table thead tr { display: flex; align-items: center; background: none; }
+            #files-table thead th { display: none; background: none; padding: 6px 0; border: 0; }
+            #files-table thead th.file-select-col { display: flex; align-items: center; gap: 10px; }
+            #files-table .select-all-label { display: inline; font-weight: 600; margin: 0; }
+            #files-table tbody tr { position: relative; border: 1px solid #e3e3e3; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+            #files-table td { border: 0; padding: 3px 0; }
+            #files-table td.file-select-col { position: absolute; top: 10px; right: 10px; width: auto; padding: 0; }
+            #files-table td.file-select-col input, #files-table th.file-select-col input { width: 24px; height: 24px; }
+            #files-table td.file-name-cell { padding-right: 40px; word-break: break-word; font-size: 16px; }
+            #files-table td.owner-cell, #files-table td.file-meta { display: inline-block; width: auto; color: #555; font-size: 13px; margin-right: 10px; }
+            #files-table td.owner-none { display: none; }
+            #files-table td.file-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 10px; }
+            #files-table td.file-actions > button { min-height: 44px; flex: 1 1 auto; margin: 0; }
+            #files-table td.file-actions > button.btn-encrypt { flex: 0 0 52px; }
+            #files-table .share-url { width: 100%; flex-wrap: wrap; }
+            #files-table .share-url input { min-width: 0; flex: 1 1 100%; }
+
+            /* Other tables scroll inside their own box instead of widening the page */
+            .tab-content table:not(#files-table) { display: block; overflow-x: auto; max-width: 100%; position: relative; }
+            .code-block code, .code-block pre { white-space: pre-wrap; word-break: break-all; }
+            .modal-content { min-width: 0 !important; width: 94vw; max-width: 94vw !important; padding: 20px; max-height: 90vh; overflow-y: auto; }
+            .setting-group { padding: 14px !important; }
+            .setting-group input:not([type=checkbox]):not([type=radio]), .setting-group select, .setting-group textarea { max-width: 100%; }
+            .setting-row-split { flex-direction: column; }
+            .user-item { min-height: 44px; }
+            .user-form-row { flex-wrap: wrap; }
+            .user-form-row input[type="text"], .user-form-row input[type="password"], .user-form-row select { width: 100%; flex: 1 1 100%; }
+            .user-form-row button { min-height: 44px; flex: 1 1 100%; }
+        }
     </style>
 </head>
 <body>
+    <a class="ws-skip" href="#main">Skip to content</a>
     <div class="container">
+        <header class="page-header">
         <?php if (!empty($siteConfig['speedtest_url'])): ?>
-        <a href="<?= htmlspecialchars($siteConfig['speedtest_url']) ?>" target="_blank" class="speed-link">🚀 Speed Test</a>
+        <a href="<?= htmlspecialchars($siteConfig['speedtest_url']) ?>" target="_blank" rel="noopener" class="speed-link">🚀 Speed Test</a>
         <?php endif; ?>
         <div class="user-header">
             <?php
@@ -2554,8 +2659,9 @@ function getRecentChanges($limit = 8) {
             <span class="current-user">👤 <?= htmlspecialchars($currentUser) ?></span>
             <a href="/logout.php" class="logout-link">🚪 Logout</a>
         </div>
-        <h1><a href="#" onclick="showAboutModal(); return false;" style="color: inherit; text-decoration: none;" title="About WebShare">WebShare</a> <?php if ($isAdmin): ?><a href="#" id="versionLink" onclick="showUpdateModal(); return false;" style="font-size: 14px; color: #888; font-weight: normal; text-decoration: none;" title="Check for Updates">v<?= WEBSHARE_VERSION ?></a><?php else: ?><span style="font-size: 14px; color: #888; font-weight: normal;">v<?= WEBSHARE_VERSION ?></span><?php endif; ?></h1>
+        <h1><a href="#" onclick="showAboutModal(); return false;" style="color: inherit; text-decoration: none;" title="About WebShare">WebShare</a> <?php if ($isAdmin): ?><a href="#" id="versionLink" onclick="showUpdateModal(); return false;" style="font-size: 14px; color: #6B6B6B; font-weight: normal; text-decoration: none;" title="Check for Updates">v<?= WEBSHARE_VERSION ?></a><?php else: ?><span style="font-size: 14px; color: #6B6B6B; font-weight: normal;">v<?= WEBSHARE_VERSION ?></span><?php endif; ?></h1>
         <p class="subtitle">Simple File Sharing System</p>
+        </header>
 
         <?php if (isset($success)): ?>
             <div class="alert alert-success"><?= htmlspecialchars($success) ?></div>
@@ -2566,17 +2672,20 @@ function getRecentChanges($limit = 8) {
         <?php endif; ?>
 
         <!-- Tabs -->
-        <div class="tabs">
-            <button class="tab active" onclick="switchTab('files')">📁 Files</button>
-            <button class="tab" onclick="switchTab('texts')">💬 Chats</button>
-            <button class="tab" onclick="switchTab('help')">❓ Help</button>
-            <?php if ($isAdmin): ?><button class="tab" onclick="switchTab('settings')">⚙️ Settings</button><?php endif; ?>
-            <?php if ($isAdmin): ?><button class="tab" onclick="switchTab('audit')">📊 Audit Log</button><?php endif; ?>
-            <button class="tab" onclick="switchTab('sessions')">🔐 Sessions</button>
+        <nav aria-label="Sections">
+        <div class="tabs" role="tablist">
+            <button class="tab active" role="tab" id="tabbtn-files" data-tab="files" aria-controls="files-tab" aria-selected="true" onclick="switchTab('files')"><span aria-hidden="true">📁</span> Files</button>
+            <button class="tab" role="tab" id="tabbtn-texts" data-tab="texts" aria-controls="texts-tab" aria-selected="false" tabindex="-1" onclick="switchTab('texts')"><span aria-hidden="true">💬</span> Chats</button>
+            <button class="tab" role="tab" id="tabbtn-help" data-tab="help" aria-controls="help-tab" aria-selected="false" tabindex="-1" onclick="switchTab('help')"><span aria-hidden="true">❓</span> Help</button>
+            <?php if ($isAdmin): ?><button class="tab" role="tab" id="tabbtn-settings" data-tab="settings" aria-controls="settings-tab" aria-selected="false" tabindex="-1" onclick="switchTab('settings')"><span aria-hidden="true">⚙️</span> Settings</button><?php endif; ?>
+            <?php if ($isAdmin): ?><button class="tab" role="tab" id="tabbtn-audit" data-tab="audit" aria-controls="audit-tab" aria-selected="false" tabindex="-1" onclick="switchTab('audit')"><span aria-hidden="true">📊</span> Audit Log</button><?php endif; ?>
+            <button class="tab" role="tab" id="tabbtn-sessions" data-tab="sessions" aria-controls="sessions-tab" aria-selected="false" tabindex="-1" onclick="switchTab('sessions')"><span aria-hidden="true">🔐</span> Sessions</button>
         </div>
+        </nav>
 
+        <main id="main" tabindex="-1">
         <!-- Files Tab -->
-        <div class="tab-content active" id="files-tab">
+        <div class="tab-content active" id="files-tab" role="tabpanel" aria-labelledby="tabbtn-files">
             <!-- Main Folder Navigation -->
             <div class="folder-nav">
                 <?php foreach ($userFolders as $folder): ?>
@@ -2647,8 +2756,8 @@ function getRecentChanges($limit = 8) {
                             <?php if ($isShared): ?><span class="shared-badge">🔗</span><?php endif; ?>
                         </a>
                         <div class="subfolder-actions">
-                            <button class="btn-share-folder" onclick="showFolderShareModal('<?= htmlspecialchars($subfolder['path'], ENT_QUOTES) ?>', '<?= $shareToken ?>')" title="Share folder">🔗</button>
-                            <button class="btn-delete-folder" onclick="deleteSubfolder('<?= htmlspecialchars($subfolder['path'], ENT_QUOTES) ?>')" title="Delete folder">🗑️</button>
+                            <button class="btn-share-folder" onclick="showFolderShareModal('<?= htmlspecialchars($subfolder['path'], ENT_QUOTES) ?>', '<?= $shareToken ?>')" title="Share folder" aria-label="Share folder <?= htmlspecialchars($subfolder['name'] ?? basename($subfolder['path']), ENT_QUOTES) ?>">🔗</button>
+                            <button class="btn-delete-folder" onclick="deleteSubfolder('<?= htmlspecialchars($subfolder['path'], ENT_QUOTES) ?>')" title="Delete folder" aria-label="Delete folder <?= htmlspecialchars($subfolder['name'] ?? basename($subfolder['path']), ENT_QUOTES) ?>">🗑️</button>
                         </div>
                     </div>
                     <?php endforeach; ?>
@@ -2664,7 +2773,7 @@ function getRecentChanges($limit = 8) {
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                 <div onclick="document.getElementById('fileInput').click()" style="cursor: pointer;">
                     <div style="font-size: 48px; margin-bottom: 10px;">&#128228;</div>
-                    <h3>Click to upload or drag and drop</h3>
+                    <h2 class="drop-title">Click to upload or drag and drop</h2>
                     <p class="upload-info">Maximum file size: <?= formatBytes($maxFileSize) ?></p>
                 </div>
                 <input type="file" name="file" id="fileInput" style="display: none;" multiple>
@@ -2805,10 +2914,10 @@ function getRecentChanges($limit = 8) {
                         Delete selected (<span id="selectedCount">0</span>)
                     </button>
                 </div>
-                <table>
+                <table id="files-table">
                     <thead>
                         <tr>
-                            <th class="file-select-col"><input type="checkbox" id="selectAllFiles" onchange="toggleSelectAllFiles(this)" title="Select all"></th>
+                            <th class="file-select-col"><input type="checkbox" id="selectAllFiles" onchange="toggleSelectAllFiles(this)" title="Select all" aria-label="Select all files"><label for="selectAllFiles" class="select-all-label">Select all</label></th>
                             <th>Filename</th>
                             <th>Owner</th>
                             <th>Size</th>
@@ -2822,19 +2931,19 @@ function getRecentChanges($limit = 8) {
                         ?>
                             <tr class="<?= $isEncrypted ? 'file-encrypted' : '' ?>">
                                 <td class="file-select-col">
-                                    <input type="checkbox" class="file-select" value="<?= htmlspecialchars($file['name'], ENT_QUOTES) ?>" onchange="updateFileSelection()">
+                                    <input type="checkbox" class="file-select" value="<?= htmlspecialchars($file['name'], ENT_QUOTES) ?>" onchange="updateFileSelection()" aria-label="Select <?= htmlspecialchars($file['name'], ENT_QUOTES) ?>">
                                 </td>
-                                <td>
+                                <td class="file-name-cell">
                                     <a href="download.php?file=<?= urlencode($file['name']) ?>&folder=<?= urlencode($currentFolder) ?>" class="file-name">
                                         <?php if ($isEncrypted): ?>🔒 <?php endif; ?>
                                         <?= htmlspecialchars($file['name']) ?>
                                     </a>
                                     <?php if ($isEncrypted): ?><span class="encrypted-badge">ENCRYPTED</span><?php endif; ?>
                                 </td>
-                                <td class="owner-cell"><?= htmlspecialchars($file['owner']) ?></td>
-                                <td><?= formatBytes($file['size']) ?></td>
-                                <td><?= date('Y-m-d H:i:s', $file['date']) ?></td>
-                                <td>
+                                <td class="owner-cell<?= ($file['owner'] === '-' || $file['owner'] === '') ? ' owner-none' : '' ?>"><?= htmlspecialchars($file['owner']) ?></td>
+                                <td class="file-meta"><?= formatBytes($file['size']) ?></td>
+                                <td class="file-meta"><time datetime="<?= date('c', $file['date']) ?>"><?= date('d.m.Y H:i', $file['date']) ?></time></td>
+                                <td class="file-actions">
                                     <button class="btn-move" onclick="showMoveModal('<?= htmlspecialchars($file['name'], ENT_QUOTES) ?>')">
                                         ↔️ Move
                                     </button>
@@ -2857,7 +2966,7 @@ function getRecentChanges($limit = 8) {
                                     </button>
                                     <?php endif; ?>
                                     <div class="share-url" id="share-<?= $index ?>">
-                                        <input type="text" readonly id="url-<?= $index ?>">
+                                        <input type="text" readonly id="url-<?= $index ?>" aria-label="Share link for <?= htmlspecialchars($file['name'], ENT_QUOTES) ?>">
                                         <button class="btn-copy" onclick="copyShareLink(<?= $index ?>)">
                                             Copy
                                         </button>
@@ -2880,9 +2989,9 @@ function getRecentChanges($limit = 8) {
         </div><!-- End Files Tab -->
 
         <!-- Chats Tab -->
-        <div class="tab-content" id="texts-tab">
+        <div class="tab-content" id="texts-tab" role="tabpanel" aria-labelledby="tabbtn-texts">
             <div class="upload-section">
-                <h3 style="margin-bottom: 20px;">💬 Start New Conversation</h3>
+                <h2 style="margin-bottom: 20px; font-size: 1.17em;">💬 Start New Conversation</h2>
                 <p style="color: #666; margin-bottom: 15px; font-size: 14px;">Create a chat room - anyone with the link can join and reply.</p>
 
                 <div style="margin-bottom: 15px;">
@@ -2949,12 +3058,12 @@ function getRecentChanges($limit = 8) {
                                 <span class="extend-btns"><button class="btn-ext" onclick="extendText('<?= $text['token'] ?>', '1d')">+1d</button><button class="btn-ext" onclick="extendText('<?= $text['token'] ?>', '1w')">+1w</button><button class="btn-ext" onclick="extendText('<?= $text['token'] ?>', '1m')">+1m</button><button class="btn-ext" onclick="extendText('<?= $text['token'] ?>', '6m')">+6m</button><button class="btn-ext" onclick="extendText('<?= $text['token'] ?>', 'permanent')">∞</button><button class="btn-set" onclick="setText('<?= $text['token'] ?>', '1h')">1h</button><button class="btn-set" onclick="setText('<?= $text['token'] ?>', '1d')">1d</button></span>
                             </div>
                             <div class="share-url" id="share-text-<?= $text['token'] ?>">
-                                <input type="text" readonly id="url-text-<?= $text['token'] ?>" value="https://<?= $_SERVER['HTTP_HOST'] ?>/t/<?= $text['token'] ?>">
+                                <input type="text" readonly id="url-text-<?= $text['token'] ?>" aria-label="Chat link" value="https://<?= htmlspecialchars($_SERVER['HTTP_HOST']) ?>/t/<?= $text['token'] ?>">
                                 <button class="btn-copy" onclick="copyExistingTextLink('<?= $text['token'] ?>')">Copy</button>
                                 <?php if (!empty($siteConfig['mail']['enabled'])): ?>
-                                <button class="btn-copy" style="background: #2196F3;" onclick="emailChatLink('<?= $text['token'] ?>')">Email</button>
+                                <button class="btn-copy" style="background: #1565C0;" onclick="emailChatLink('<?= $text['token'] ?>')">Email</button>
                                 <?php endif; ?>
-                                <button class="btn-copy" style="background: #ff9800;" onclick="regenerateChatToken('<?= $text['token'] ?>')">New ID</button>
+                                <button class="btn-copy" style="background: #B45309;" onclick="regenerateChatToken('<?= $text['token'] ?>')">New ID</button>
                             </div>
                         </div>
                     <?php endforeach; ?>
@@ -2963,11 +3072,25 @@ function getRecentChanges($limit = 8) {
         </div><!-- End Texts Tab -->
 
         <!-- Help Tab -->
-        <div class="tab-content" id="help-tab">
+        <div class="tab-content" id="help-tab" role="tabpanel" aria-labelledby="tabbtn-help">
             <?php $currentHost = $_SERVER['HTTP_HOST']; ?>
             <div class="help-section">
                 <h2>❓ Help & CLI Upload</h2>
                 <p style="color: #666; margin-bottom: 20px;">Upload files directly from command line without a browser.</p>
+                <?php $ugHelp = ug_config($siteConfig); if ($ugHelp['mode'] === 'verified' && empty($ugHelp['curl_without_pass'])): ?>
+                <div class="help-card" style="border-left: 4px solid #4C51BF;">
+                    <h3>🛡️ Upload code required for anonymous curl</h3>
+                    <p style="font-size: 13px; color: #555; margin: 6px 0;">
+                        Anonymous uploads to /u need an upload code. Open <b>https://<?= htmlspecialchars($currentHost) ?>/u</b> in a browser,
+                        confirm you are not a robot and copy the code shown there. Then add it as a header to every command below.
+                        For your own scripts, use an API key instead (see the API section).
+                    </p>
+                    <div class="code-block">
+                        <code>curl -H "X-Upload-Pass: <span class="code-var">ABCD-EFGH</span>" -F "file=@<span class="code-var">file.pdf</span>" https://<?= htmlspecialchars($currentHost) ?>/u</code>
+                        <button class="copy-btn" onclick="copyCode(this)">📋</button>
+                    </div>
+                </div>
+                <?php endif; ?>
 
                 <!-- Linux Section -->
                 <div class="help-accordion">
@@ -2978,7 +3101,7 @@ function getRecentChanges($limit = 8) {
                     <div class="help-accordion-content" id="linux-content">
 
                         <div class="help-card">
-                            <h4>📤 Basic Upload (to Public folder)</h4>
+                            <h3>📤 Basic Upload (to Public folder)</h3>
                             <div class="code-block">
                                 <code>curl -F "file=@<span class="code-var">/path/to/file.txt</span>" https://<?= htmlspecialchars($currentHost) ?>/u</code>
                                 <button class="copy-btn" onclick="copyCode(this)">📋</button>
@@ -2986,7 +3109,7 @@ function getRecentChanges($limit = 8) {
                         </div>
 
                         <div class="help-card">
-                            <h4>👤 Upload to Specific User</h4>
+                            <h3>👤 Upload to Specific User</h3>
                             <div class="code-block">
                                 <code>curl -F "file=@<span class="code-var">file.pdf</span>" -F "target_user=<span class="code-var"><?= htmlspecialchars($currentUser) ?></span>" https://<?= htmlspecialchars($currentHost) ?>/u</code>
                                 <button class="copy-btn" onclick="copyCode(this)">📋</button>
@@ -2994,7 +3117,7 @@ function getRecentChanges($limit = 8) {
                         </div>
 
                         <div class="help-card">
-                            <h4>🔒 Upload with Encryption</h4>
+                            <h3>🔒 Upload with Encryption</h3>
                             <div class="code-block">
                                 <code>curl -F "file=@<span class="code-var">secret.doc</span>" -F "target_user=<span class="code-var"><?= htmlspecialchars($currentUser) ?></span>" -F "encrypt=1" -F "encrypt_password=<span class="code-var">mypass</span>" https://<?= htmlspecialchars($currentHost) ?>/u</code>
                                 <button class="copy-btn" onclick="copyCode(this)">📋</button>
@@ -3002,7 +3125,7 @@ function getRecentChanges($limit = 8) {
                         </div>
 
                         <div class="help-card" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);">
-                            <h4 style="color: #4ade80;">⚡ Quick Alias (add to ~/.bashrc)</h4>
+                            <h3 style="color: #4ade80;">⚡ Quick Alias (add to ~/.bashrc)</h3>
                             <div class="code-block" style="background: #0d1117;">
                                 <pre style="color: #c9d1d9; margin: 0; font-size: 13px;"><span style="color: #ff7b72;">webshare</span>() {
     <span style="color: #79c0ff;">curl</span> <span style="color: #a5d6ff;">-F</span> <span style="color: #a5d6ff;">"file=@</span><span style="color: #ffa657;">$1</span><span style="color: #a5d6ff;">"</span> <span style="color: #ffa657;">${2:+-F "target_user=$2"}</span> https://<?= htmlspecialchars($currentHost) ?>/u
@@ -3018,7 +3141,7 @@ function getRecentChanges($limit = 8) {
                         </div>
 
                         <div class="help-card">
-                            <h4>📁 Upload Multiple Files</h4>
+                            <h3>📁 Upload Multiple Files</h3>
                             <div class="code-block">
                                 <code>for f in *.jpg; do curl -F "file=@$f" -F "target_user=<?= htmlspecialchars($currentUser) ?>" https://<?= htmlspecialchars($currentHost) ?>/u; done</code>
                                 <button class="copy-btn" onclick="copyCode(this)">📋</button>
@@ -3037,7 +3160,7 @@ function getRecentChanges($limit = 8) {
                     <div class="help-accordion-content" id="windows-content">
 
                         <div class="help-card">
-                            <h4>📤 PowerShell - Basic Upload</h4>
+                            <h3>📤 PowerShell - Basic Upload</h3>
                             <div class="code-block powershell">
                                 <code>Invoke-RestMethod -Uri "https://<?= htmlspecialchars($currentHost) ?>/u" -Method Post -Form @{file = Get-Item "<span class="code-var">C:\path\to\file.txt</span>"}</code>
                                 <button class="copy-btn" onclick="copyCode(this)">📋</button>
@@ -3045,7 +3168,7 @@ function getRecentChanges($limit = 8) {
                         </div>
 
                         <div class="help-card">
-                            <h4>👤 PowerShell - Upload to User</h4>
+                            <h3>👤 PowerShell - Upload to User</h3>
                             <div class="code-block powershell">
                                 <code>Invoke-RestMethod -Uri "https://<?= htmlspecialchars($currentHost) ?>/u" -Method Post -Form @{file = Get-Item "<span class="code-var">file.pdf</span>"; target_user = "<span class="code-var"><?= htmlspecialchars($currentUser) ?></span>"}</code>
                                 <button class="copy-btn" onclick="copyCode(this)">📋</button>
@@ -3053,7 +3176,7 @@ function getRecentChanges($limit = 8) {
                         </div>
 
                         <div class="help-card">
-                            <h4>🔒 PowerShell - With Encryption</h4>
+                            <h3>🔒 PowerShell - With Encryption</h3>
                             <div class="code-block powershell">
                                 <code>Invoke-RestMethod -Uri "https://<?= htmlspecialchars($currentHost) ?>/u" -Method Post -Form @{file = Get-Item "<span class="code-var">secret.doc</span>"; target_user = "<span class="code-var"><?= htmlspecialchars($currentUser) ?></span>"; encrypt = "1"; encrypt_password = "<span class="code-var">mypass</span>"}</code>
                                 <button class="copy-btn" onclick="copyCode(this)">📋</button>
@@ -3061,7 +3184,7 @@ function getRecentChanges($limit = 8) {
                         </div>
 
                         <div class="help-card" style="background: linear-gradient(135deg, #012456 0%, #1e3a5f 100%);">
-                            <h4 style="color: #61dafb;">⚡ PowerShell Function (add to $PROFILE)</h4>
+                            <h3 style="color: #61dafb;">⚡ PowerShell Function (add to $PROFILE)</h3>
                             <div class="code-block" style="background: #0d1117;">
                                 <pre style="color: #c9d1d9; margin: 0; font-size: 13px;"><span style="color: #ff7b72;">function</span> <span style="color: #d2a8ff;">WebShare</span> {
     <span style="color: #ff7b72;">param</span>(
@@ -3083,7 +3206,7 @@ function getRecentChanges($limit = 8) {
                         </div>
 
                         <div class="help-card">
-                            <h4>🌐 Using curl (if installed)</h4>
+                            <h3>🌐 Using curl (if installed)</h3>
                             <div class="code-block">
                                 <code>curl.exe -F "file=@<span class="code-var">C:\path\to\file.txt</span>" https://<?= htmlspecialchars($currentHost) ?>/u</code>
                                 <button class="copy-btn" onclick="copyCode(this)">📋</button>
@@ -3095,7 +3218,7 @@ function getRecentChanges($limit = 8) {
 
                 <!-- Quick Reference -->
                 <div class="help-card" style="margin-top: 20px; background: #f0f9ff; border-left: 4px solid #0ea5e9;">
-                    <h4 style="color: #0369a1;">📋 Quick Reference</h4>
+                    <h3 style="color: #0369a1;">📋 Quick Reference</h3>
                     <table style="width: 100%; font-size: 13px; margin-top: 10px;">
                         <tr style="background: #e0f2fe;">
                             <td style="padding: 8px; font-weight: bold;">Parameter</td>
@@ -3132,8 +3255,8 @@ function getRecentChanges($limit = 8) {
                         $userApiKey = getUserApiKey($currentUser); // First key for backward compat
                         ?>
 
-                        <div class="help-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
-                            <h4 style="color: white;">🔑 Your API Keys</h4>
+                        <div class="help-card" style="background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);">
+                            <h3 style="color: white;">🔑 Your API Keys</h3>
                             <p style="color: rgba(255,255,255,0.8); font-size: 13px; margin-bottom: 15px;">
                                 Manage API keys for uploading files. You can create multiple keys with IP restrictions.
                             </p>
@@ -3166,13 +3289,13 @@ function getRecentChanges($limit = 8) {
                                             </td>
                                             <td style="padding: 10px;">
                                                 <?php if ($keyInfo['is_allow_all']): ?>
-                                                    <span style="color: #2196f3; font-size: 12px;" title="Allow from any IP">
+                                                    <span style="color: #1565C0; font-size: 12px;" title="Allow from any IP">
                                                         🌍 All IPs
                                                     </span>
                                                     <button onclick="editKeyIps('<?= htmlspecialchars($keyInfo['id']) ?>', '0.0.0.0/0')"
                                                             style="background: none; border: none; cursor: pointer; font-size: 12px;" title="Edit">✏️</button>
                                                 <?php elseif ($keyInfo['is_auto_learn']): ?>
-                                                    <span style="color: #ff9800; font-size: 12px;" title="Will lock to first IP used">
+                                                    <span style="color: #B45309; font-size: 12px;" title="Will lock to first IP used">
                                                         🎓 Auto-learn
                                                     </span>
                                                     <button onclick="editKeyIps('<?= htmlspecialchars($keyInfo['id']) ?>', '')"
@@ -3186,11 +3309,11 @@ function getRecentChanges($limit = 8) {
                                                 <?php endif; ?>
                                             </td>
                                             <td style="padding: 10px; font-size: 12px; color: #666;">
-                                                <?= $keyInfo['last_used'] ? date('Y-m-d H:i', $keyInfo['last_used']) : 'Never' ?>
+                                                <?= $keyInfo['last_used'] ? date('d.m.Y H:i', $keyInfo['last_used']) : 'Never' ?>
                                             </td>
                                             <td style="padding: 10px; text-align: center;">
                                                 <button onclick="revokeKey('<?= htmlspecialchars($keyInfo['id']) ?>', '<?= htmlspecialchars($keyInfo['name']) ?>')"
-                                                        style="background: #f44336; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                                                        style="background: #C62828; color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;">
                                                     🗑️
                                                 </button>
                                             </td>
@@ -3203,7 +3326,7 @@ function getRecentChanges($limit = 8) {
 
                             <!-- Add New Key Form -->
                             <div style="background: rgba(255,255,255,0.9); padding: 15px; border-radius: 8px;">
-                                <h5 style="margin: 0 0 10px 0; color: #333;">➕ Add New API Key</h5>
+                                <h4 style="margin: 0 0 10px 0; color: #333;">➕ Add New API Key</h4>
                                 <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
                                     <div style="flex: 1; min-width: 150px;">
                                         <label style="display: block; font-size: 12px; color: #666; margin-bottom: 4px;">Name (optional)</label>
@@ -3218,11 +3341,11 @@ function getRecentChanges($limit = 8) {
                                                style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
                                     </div>
                                     <button onclick="generateNewKey()" class="btn"
-                                            style="background: #4CAF50; border: none; padding: 8px 16px; white-space: nowrap;">
+                                            style="background: #2E7D32; border: none; padding: 8px 16px; white-space: nowrap;">
                                         🔑 Generate Key
                                     </button>
                                 </div>
-                                <p style="font-size: 11px; color: #888; margin: 8px 0 0 0;">
+                                <p style="font-size: 11px; color: #6B6B6B; margin: 8px 0 0 0;">
                                     💡 Empty = auto-learn (locks to first IP used) | <code>0.0.0.0/0</code> = allow all | CIDR: <code>192.168.1.0/24</code>
                                 </p>
                             </div>
@@ -3231,12 +3354,12 @@ function getRecentChanges($limit = 8) {
                         <!-- New Key Display Modal (hidden by default) -->
                         <div id="newKeyModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 9999; align-items: center; justify-content: center;">
                             <div style="background: white; padding: 30px; border-radius: 12px; max-width: 600px; width: 90%; text-align: center;">
-                                <h3 style="color: #4CAF50; margin-bottom: 15px;">✅ API Key Generated!</h3>
+                                <h3 style="color: #2E7D32; margin-bottom: 15px;">✅ API Key Generated!</h3>
                                 <p style="color: #666; margin-bottom: 15px;">Copy this key now - it won't be shown again:</p>
                                 <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-bottom: 15px; word-break: break-all;">
                                     <code id="newKeyValue" style="font-size: 14px; color: #333;"></code>
                                 </div>
-                                <button onclick="copyNewKey()" class="btn" style="background: #667eea; border: none; padding: 10px 20px; margin-right: 10px;">
+                                <button onclick="copyNewKey()" class="btn" style="background: #4C51BF; border: none; padding: 10px 20px; margin-right: 10px;">
                                     📋 Copy Key
                                 </button>
                                 <button onclick="closeNewKeyModal()" class="btn" style="background: #6c757d; border: none; padding: 10px 20px;">
@@ -3247,7 +3370,7 @@ function getRecentChanges($limit = 8) {
 
                         <?php if ($userApiKey): ?>
                         <div class="help-card">
-                            <h4>📥 Windows Right-Click Integration</h4>
+                            <h3>📥 Windows Right-Click Integration</h3>
                             <p style="color: #666; font-size: 13px; margin-bottom: 15px;">
                                 Download these files to add "Upload to WebShare" to your right-click menu.
                             </p>
@@ -3273,7 +3396,7 @@ function getRecentChanges($limit = 8) {
                         </div>
 
                         <div class="help-card">
-                            <h4>🖥️ Command Line Usage</h4>
+                            <h3>🖥️ Command Line Usage</h3>
                             <div class="code-block" style="background: #263238;">
                                 <code style="color: #aed581;">curl -X POST -H "X-API-Key: <span class="code-var">YOUR_KEY</span>" -F "file=@<span class="code-var">file.pdf</span>" <?= htmlspecialchars((isset($_SERVER['HTTPS']) ? 'https' : 'http') . '://' . $_SERVER['HTTP_HOST']) ?>/api-upload.php</code>
                                 <button class="copy-btn" onclick="copyCode(this)">📋</button>
@@ -3281,7 +3404,7 @@ function getRecentChanges($limit = 8) {
                         </div>
 
                         <div class="help-card">
-                            <h4>📁 Upload to Specific Folder</h4>
+                            <h3>📁 Upload to Specific Folder</h3>
                             <p style="color: #666; font-size: 13px; margin-bottom: 10px;">
                                 Add <code>folder</code> parameter to upload to a subfolder:
                             </p>
@@ -3292,7 +3415,7 @@ function getRecentChanges($limit = 8) {
                         </div>
 
                         <div class="help-card">
-                            <h4>📤 Upload to Shared Folder</h4>
+                            <h3>📤 Upload to Shared Folder</h3>
                             <p style="color: #666; font-size: 13px; margin-bottom: 10px;">
                                 Upload directly to a shared folder (no API key needed, upload must be enabled):
                             </p>
@@ -3303,11 +3426,11 @@ function getRecentChanges($limit = 8) {
                         </div>
 
                         <div class="help-card">
-                            <h4>📄 PowerShell Script (Alternative)</h4>
+                            <h3>📄 PowerShell Script (Alternative)</h3>
                             <p style="color: #666; font-size: 13px; margin-bottom: 10px;">
                                 For older Windows without curl, use PowerShell:
                             </p>
-                            <a href="api-scripts.php?type=ps1&key=<?= urlencode($userApiKey) ?>" class="btn" style="background: #2196F3; text-decoration: none; padding: 8px 15px;">
+                            <a href="api-scripts.php?type=ps1&key=<?= urlencode($userApiKey) ?>" class="btn" style="background: #1565C0; text-decoration: none; padding: 8px 15px;">
                                 📄 upload-webshare.ps1
                             </a>
                             <a href="api-scripts.php?type=reg-ps1&key=<?= urlencode($userApiKey) ?>" class="btn" style="background: #9C27B0; text-decoration: none; padding: 8px 15px; margin-left: 10px;">
@@ -3324,7 +3447,7 @@ function getRecentChanges($limit = 8) {
 
         <!-- Settings Tab (Admin Only) -->
         <?php if ($isAdmin): ?>
-        <div class="tab-content" id="settings-tab">
+        <div class="tab-content" id="settings-tab" role="tabpanel" aria-labelledby="tabbtn-settings">
             <div class="settings-section">
                 <h2>⚙️ Settings</h2>
 
@@ -3393,12 +3516,24 @@ function getRecentChanges($limit = 8) {
                                     <?php if ($user === $currentUser): ?>
                                         <span class="user-badge">you</span>
                                     <?php endif; ?>
-                                    <?php if (count($users) > 1): ?>
-                                        <form method="POST" style="display: inline;" onsubmit="return confirm('Delete user <?= htmlspecialchars($user) ?>?')">
+                                    <?php if (count($users) > 1 && $user !== $currentUser):
+                                        $uStats = ['files' => 0, 'bytes' => 0];
+                                        $uDir = __DIR__ . '/files/' . $user;
+                                        if (is_dir($uDir)) {
+                                            foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($uDir, FilesystemIterator::SKIP_DOTS)) as $uf) {
+                                                if ($uf->isFile()) { $uStats['files']++; $uStats['bytes'] += $uf->getSize(); }
+                                            }
+                                        }
+                                    ?>
+                                        <form method="POST" style="display: inline;"
+                                              data-user="<?= htmlspecialchars($user) ?>"
+                                              data-files="<?= (int)$uStats['files'] ?>"
+                                              data-size="<?= htmlspecialchars(formatBytes($uStats['bytes'])) ?>"
+                                              onsubmit="return confirmUserDelete(event, this)">
                                             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
                                             <input type="hidden" name="user_action" value="delete">
                                             <input type="hidden" name="delete_username" value="<?= htmlspecialchars($user) ?>">
-                                            <button type="submit" class="btn-user-delete">✕</button>
+                                            <button type="submit" class="btn-user-delete" aria-label="Delete user <?= htmlspecialchars($user) ?>" title="Delete user <?= htmlspecialchars($user) ?>">✕</button>
                                         </form>
                                     <?php endif; ?>
                                 </div>
@@ -3413,8 +3548,8 @@ function getRecentChanges($limit = 8) {
                         <div class="setting-row">
                             <label>Add New User:</label>
                             <div class="user-form-row">
-                                <input type="text" name="new_username" placeholder="Username" required pattern="[a-zA-Z0-9_-]{3,20}">
-                                <input type="password" name="new_password" placeholder="Password" required minlength="4">
+                                <input type="text" name="new_username" placeholder="Username" aria-label="New username" required pattern="[a-zA-Z0-9_-]{3,20}" autocomplete="off">
+                                <input type="password" name="new_password" placeholder="Password" aria-label="Password for the new user" required minlength="4" autocomplete="new-password">
                                 <button type="submit" class="btn-user-add">+ Add</button>
                             </div>
                             <small>Username: 3-20 characters (letters, numbers, - _). Password: min 4 characters.</small>
@@ -3428,13 +3563,13 @@ function getRecentChanges($limit = 8) {
                         <div class="setting-row">
                             <label>Change Password:</label>
                             <div class="user-form-row">
-                                <select name="change_username" required>
+                                <select name="change_username" aria-label="User whose password to change" required>
                                     <option value="">Select user...</option>
                                     <?php foreach ($users as $user): ?>
                                         <option value="<?= htmlspecialchars($user) ?>"><?= htmlspecialchars($user) ?></option>
                                     <?php endforeach; ?>
                                 </select>
-                                <input type="password" name="change_password" placeholder="New Password" required minlength="4">
+                                <input type="password" name="change_password" placeholder="New Password" aria-label="New password" required minlength="4" autocomplete="new-password">
                                 <button type="submit" class="btn-user-change">Change</button>
                             </div>
                         </div>
@@ -3449,14 +3584,14 @@ function getRecentChanges($limit = 8) {
                     <?php $currentSpeedtest = $siteConfig['speedtest_url'] ?? ''; ?>
 
                     <?php if (!empty($currentSpeedtest)): ?>
-                    <div class="setting-info" style="margin-bottom: 15px; background: #e8f5e9; border-left: 4px solid #4CAF50;">
+                    <div class="setting-info" style="margin-bottom: 15px; background: #e8f5e9; border-left: 4px solid #2E7D32;">
                         <strong>Current:</strong>
-                        <a href="<?= htmlspecialchars($currentSpeedtest) ?>" target="_blank" style="color: #1976D2; word-break: break-all;">
+                        <a href="<?= htmlspecialchars($currentSpeedtest) ?>" target="_blank" style="color: #1565C0; word-break: break-all;">
                             <?= htmlspecialchars($currentSpeedtest) ?>
                         </a>
                     </div>
                     <?php else: ?>
-                    <div class="setting-info" style="margin-bottom: 15px; background: #fff3e0; border-left: 4px solid #ff9800;">
+                    <div class="setting-info" style="margin-bottom: 15px; background: #fff3e0; border-left: 4px solid #B45309;">
                         <strong>Status:</strong> No speed test link configured
                     </div>
                     <?php endif; ?>
@@ -3471,7 +3606,7 @@ function getRecentChanges($limit = 8) {
                         <div style="display: flex; gap: 10px; margin-top: 15px;">
                             <button type="submit" class="btn btn-save">💾 <?= empty($currentSpeedtest) ? 'Save' : 'Update' ?></button>
                             <?php if (!empty($currentSpeedtest)): ?>
-                            <button type="submit" name="speedtest_url" value="" class="btn" style="background: #f44336;">🗑️ Remove</button>
+                            <button type="submit" name="speedtest_url" value="" class="btn" style="background: #C62828;">🗑️ Remove</button>
                             <?php endif; ?>
                         </div>
                     </form>
@@ -3500,20 +3635,124 @@ function getRecentChanges($limit = 8) {
                             <small style="display: block; margin-top: 8px; color: #666;">Allow anyone to create and participate in chats without logging in.</small>
                         </div>
 
+                        <?php $ugCfg = ug_config($siteConfig); ?>
                         <div class="setting-row" style="margin-top: 15px;">
-                            <label class="toggle">
-                                <input type="checkbox" name="open_upload" id="open_upload" <?= $openUpload ? 'checked' : '' ?> onchange="updateToggleStatus(this)">
-                                <span class="toggle-slider"></span>
-                                <span class="toggle-label">Open Upload (/u)</span>
-                                <span class="toggle-status <?= $openUpload ? 'on' : 'off' ?>">
-                                    <?= $openUpload ? 'OPEN' : 'LOGIN REQUIRED' ?>
-                                </span>
-                            </label>
-                            <small style="display: block; margin-top: 8px; color: #666;">Allow anyone to upload files without logging in.</small>
+                            <label for="upload_mode" style="font-weight: 600; display: block; margin-bottom: 6px;">Upload (/u) mode</label>
+                            <select name="upload_mode" id="upload_mode" style="padding: 10px; border: 1px solid #ddd; border-radius: 8px; width: 100%; max-width: 420px;">
+                                <option value="verified" <?= $ugCfg['mode'] === 'verified' ? 'selected' : '' ?>>🛡️ Verified (recommended)</option>
+                                <option value="open" <?= $ugCfg['mode'] === 'open' ? 'selected' : '' ?>>🔓 Open, no check</option>
+                                <option value="login" <?= $ugCfg['mode'] === 'login' ? 'selected' : '' ?>>🔒 Login required</option>
+                            </select>
+                            <small style="display: block; margin-top: 8px; color: #666;"><b>Verified:</b> anyone can upload after a one-time "not a robot" check. <b>Open:</b> anyone can upload without a check. <b>Login required:</b> only signed-in users. Size, daily and disk limits apply to anonymous uploads in Verified and Open mode.</small>
                         </div>
 
                         <button type="submit" class="btn btn-save" style="margin-top: 15px;">💾 Save</button>
                     </form>
+                </div>
+
+                <!-- Upload Protection Section (docs/upload-guard.md) -->
+                <?php $ugCfg = ug_config($siteConfig); $ugStats = ug_stats(); $ugPasses = ug_list_passes(); ?>
+                <div class="setting-group" style="margin-top: 30px;">
+                    <h3>🛡️ Upload Protection</h3>
+                    <p class="setting-desc">
+                        Limits for anonymous uploads. In Verified mode a visitor confirms once that they are not a robot and gets an
+                        upload pass (browser cookie + short code for curl).
+                        Today: <b><?= formatBytes($ugStats['today_bytes']) ?></b> uploaded anonymously ·
+                        <b><?= (int)$ugStats['active_passes'] ?></b> active passes.
+                    </p>
+                    <?php if ($ugCfg['provider'] === 'turnstile' && $ugCfg['provider_effective'] !== 'turnstile'): ?>
+                        <div style="background:#fff3cd;color:#856404;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:13px;">
+                            ⚠️ Turnstile is selected but the site key or secret is missing. Proof-of-work is used until both are set.
+                        </div>
+                    <?php endif; ?>
+
+                    <form method="POST">
+                        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+                        <input type="hidden" name="save_upload_guard" value="1">
+
+                        <div class="setting-row">
+                            <label for="ug_provider" style="font-weight:600;display:block;margin-bottom:6px;">Verification method</label>
+                            <select name="provider" id="ug_provider" onchange="document.getElementById('ugTurnstile').style.display = this.value === 'turnstile' ? 'block' : 'none'" style="padding:10px;border:1px solid #ddd;border-radius:8px;width:100%;max-width:420px;">
+                                <option value="pow" <?= $ugCfg['provider'] === 'pow' ? 'selected' : '' ?>>Proof-of-work (self-hosted, no third parties)</option>
+                                <option value="turnstile" <?= $ugCfg['provider'] === 'turnstile' ? 'selected' : '' ?>>Cloudflare Turnstile (stronger, needs keys)</option>
+                            </select>
+                        </div>
+
+                        <div id="ugTurnstile" style="display: <?= $ugCfg['provider'] === 'turnstile' ? 'block' : 'none' ?>; margin-top: 12px;">
+                            <div class="setting-row">
+                                <label for="ug_ts_site" style="display:block;margin-bottom:4px;">Turnstile site key</label>
+                                <input type="text" name="turnstile_site_key" id="ug_ts_site" value="<?= htmlspecialchars($ugCfg['turnstile_site_key']) ?>" style="padding:10px;border:1px solid #ddd;border-radius:8px;width:100%;max-width:420px;">
+                            </div>
+                            <div class="setting-row" style="margin-top:8px;">
+                                <label for="ug_ts_secret" style="display:block;margin-bottom:4px;">Turnstile secret key <?= $ugCfg['turnstile_secret'] !== '' ? '(saved, leave empty to keep)' : '' ?></label>
+                                <input type="password" name="turnstile_secret" id="ug_ts_secret" value="" autocomplete="off" style="padding:10px;border:1px solid #ddd;border-radius:8px;width:100%;max-width:420px;">
+                            </div>
+                        </div>
+
+                        <?php
+                        $ugFields = [
+                            ['pass_ttl_hours',     'Pass validity (hours)',              1, 720],
+                            ['pass_max_files',     'Files per pass',                     1, 10000],
+                            ['pass_max_mb',        'Size per pass (MB)',                 1, 10240],
+                            ['max_file_mb',        'Max anonymous file (MB)',            1, 10240],
+                            ['passes_per_ip_hour', 'New passes per IP per hour',         1, 1000],
+                            ['daily_cap_mb',       'Anonymous uploads per day (MB)',     1, 10485760],
+                            ['min_free_gb',        'Pause when free disk below (GB)',    0, 100000],
+                            ['pow_maxnumber',      'Proof-of-work difficulty',           1000, 1000000],
+                        ];
+                        ?>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:14px;">
+                            <?php foreach ($ugFields as [$key, $label, $min, $max]): ?>
+                            <label style="font-size:13px;">
+                                <?= htmlspecialchars($label) ?>
+                                <input type="number" name="<?= $key ?>" value="<?= (int)$ugCfg[$key] ?>" min="<?= $min ?>" max="<?= $max ?>" style="padding:8px;border:1px solid #ddd;border-radius:8px;width:100%;margin-top:4px;">
+                            </label>
+                            <?php endforeach; ?>
+                        </div>
+
+                        <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px;font-size:14px;">
+                            <label><input type="checkbox" name="block_dangerous" <?= $ugCfg['block_dangerous'] ? 'checked' : '' ?>> Block script files and hidden files (.php, .phtml, .htaccess …)</label>
+                            <label><input type="checkbox" name="notify_owner" <?= $ugCfg['notify_owner'] ? 'checked' : '' ?>> E-mail notification for every anonymous upload (uses Email Settings)</label>
+                            <label><input type="checkbox" name="curl_without_pass" <?= $ugCfg['curl_without_pass'] ? 'checked' : '' ?>> Allow curl/wget uploads without an upload code (less secure)</label>
+                        </div>
+
+                        <button type="submit" class="btn btn-save" style="margin-top: 15px;">💾 Save</button>
+                    </form>
+
+                    <h4 style="margin-top:24px;">Active upload passes</h4>
+                    <?php if (empty($ugPasses)): ?>
+                        <p style="color: #6B6B6B;font-size:13px;">No active passes.</p>
+                    <?php else: ?>
+                    <div style="overflow-x:auto;">
+                        <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;">
+                            <thead>
+                                <tr style="text-align:left;border-bottom:2px solid #eee;">
+                                    <th style="padding:6px;">Code</th><th style="padding:6px;">Created</th><th style="padding:6px;">Expires</th>
+                                    <th style="padding:6px;">IP</th><th style="padding:6px;">Files</th><th style="padding:6px;">Size</th><th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            <?php foreach ($ugPasses as $up): ?>
+                                <tr style="border-bottom:1px solid #f0f0f0;">
+                                    <td style="padding:6px;font-family:monospace;"><?= htmlspecialchars(ug_format_code($up['code'])) ?></td>
+                                    <td style="padding:6px;"><?= date('d.m.Y H:i', $up['created']) ?></td>
+                                    <td style="padding:6px;"><?= date('d.m.Y H:i', $up['expires']) ?></td>
+                                    <td style="padding:6px;"><?= htmlspecialchars($up['ip']) ?></td>
+                                    <td style="padding:6px;" title="<?= htmlspecialchars(implode("\n", array_map(fn($f) => $f['folder'] . '/' . $f['final'], $up['files']))) ?>"><?= count($up['files']) ?> / <?= (int)$up['max_files'] ?></td>
+                                    <td style="padding:6px;"><?= formatBytes($up['bytes']) ?></td>
+                                    <td style="padding:6px;">
+                                        <form method="POST" style="margin:0;">
+                                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token']) ?>">
+                                            <input type="hidden" name="revoke_upload_pass" value="<?= htmlspecialchars($up['id']) ?>">
+                                            <button type="submit" class="btn" style="background:#C62828;padding:4px 10px;font-size:12px;">Revoke</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <?php endif; ?>
                 </div>
 
                 <!-- Email Settings Section -->
@@ -3577,7 +3816,7 @@ function getRecentChanges($limit = 8) {
                                 <label>Test Email:</label>
                                 <div style="display: flex; gap: 10px;">
                                     <input type="email" id="testEmailAddr" placeholder="test@example.com" style="flex: 1; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;">
-                                    <button type="button" class="btn" style="background: #2196F3; white-space: nowrap;" onclick="testMailSettings()">📧 Send Test</button>
+                                    <button type="button" class="btn" style="background: #1565C0; white-space: nowrap;" onclick="testMailSettings()">📧 Send Test</button>
                                 </div>
                                 <div id="testMailResult" style="margin-top: 10px; display: none; padding: 10px; border-radius: 6px;"></div>
                             </div>
@@ -3589,17 +3828,17 @@ function getRecentChanges($limit = 8) {
 
                 <!-- Installation Instructions -->
                 <div class="setting-group" style="margin-top: 30px; background: #f8f9fa; padding: 25px; border-radius: 12px;">
-                    <h3>📦 Installation & Update <span style="float: right; font-size: 14px; color: #4CAF50; font-weight: normal;">Current: v<?= WEBSHARE_VERSION ?></span></h3>
+                    <h3>📦 Installation & Update <span style="float: right; font-size: 14px; color: #2E7D32; font-weight: normal;">Current: v<?= WEBSHARE_VERSION ?></span></h3>
                     <p class="setting-desc">Commands for installing and updating (run as root).</p>
 
                     <div style="margin-top: 20px;">
-                        <h4 style="color: #4CAF50; margin-bottom: 10px;">🔄 Update Existing Installation</h4>
+                        <h4 style="color: #2E7D32; margin-bottom: 10px;">🔄 Update Existing Installation</h4>
                         <p style="font-size: 13px; color: #666; margin-bottom: 8px;">Updates files while preserving users, config and uploaded files:</p>
                         <code style="display:block; background: #2d3748; color: #68d391; padding: 12px; border-radius: 8px; font-size: 12px; margin-bottom: 20px;">curl -fsSL <?= $baseUrl ?>/get-update | bash</code>
                     </div>
 
                     <div style="margin-top: 20px; padding-top: 15px; border-top: 1px dashed #ddd;">
-                        <h4 style="color: #667eea; margin-bottom: 10px;">📤 WebShare (Fresh Install)</h4>
+                        <h4 style="color: #4C51BF; margin-bottom: 10px;">📤 WebShare (Fresh Install)</h4>
                         <p style="font-size: 13px; color: #666; margin-bottom: 8px;"><strong>With parameters:</strong></p>
                         <code style="display:block; background: #2d3748; color: #68d391; padding: 12px; border-radius: 8px; font-size: 12px; margin-bottom: 12px; word-break: break-all;">curl -fsSL <?= $baseUrl ?>/get | bash -s -- domain.com admin password</code>
 
@@ -3607,7 +3846,7 @@ function getRecentChanges($limit = 8) {
                         <code style="display:block; background: #2d3748; color: #68d391; padding: 12px; border-radius: 8px; font-size: 12px; margin-bottom: 12px;">curl -fsSL <?= $baseUrl ?>/get | bash</code>
 
                         <div style="background: #fff8e1; border-left: 4px solid #ffc107; padding: 12px; border-radius: 4px; margin-top: 15px;">
-                            <strong style="color: #f57c00;">⚠️ Requirements before installation:</strong>
+                            <strong style="color: #9A3412;">⚠️ Requirements before installation:</strong>
                             <ul style="margin: 8px 0 0 0; padding-left: 20px; font-size: 13px; color: #666;">
                                 <li>Port <strong>443</strong> (HTTPS) must be open for the application</li>
                                 <li>Port <strong>80</strong> (HTTP) must be open for SSL certificate generation</li>
@@ -3618,18 +3857,18 @@ function getRecentChanges($limit = 8) {
                     </div>
 
                     <div style="margin-top: 20px; padding-top: 15px; border-top: 1px dashed #ddd;">
-                        <h4 style="color: #667eea; margin-bottom: 10px;">🚀 Speed Test (LibreSpeed + GeoIP)</h4>
+                        <h4 style="color: #4C51BF; margin-bottom: 10px;">🚀 Speed Test (LibreSpeed + GeoIP)</h4>
                         <p style="font-size: 13px; color: #666; margin-bottom: 8px;"><strong>With parameters:</strong></p>
                         <code style="display:block; background: #2d3748; color: #68d391; padding: 12px; border-radius: 8px; font-size: 12px; margin-bottom: 12px; word-break: break-all;">curl -fsSL <?= $baseUrl ?>/get-speedtest | bash -s -- speed.domain.com</code>
 
                         <p style="font-size: 13px; color: #666; margin-bottom: 8px;"><strong>Interactive:</strong></p>
                         <code style="display:block; background: #2d3748; color: #68d391; padding: 12px; border-radius: 8px; font-size: 12px; margin-bottom: 12px;">curl -fsSL <?= $baseUrl ?>/get-speedtest | bash</code>
 
-                        <p style="font-size: 13px; color: #888; margin-top: 10px;">GeoIP: Enabled by default (BG only). Config: <code style="background:#eee; padding: 2px 6px; border-radius: 4px;">/var/www/speedtest/.geo.json</code></p>
+                        <p style="font-size: 13px; color: #6B6B6B; margin-top: 10px;">GeoIP: Enabled by default (BG only). Config: <code style="background:#eee; padding: 2px 6px; border-radius: 4px;">/var/www/speedtest/.geo.json</code></p>
                     </div>
 
                     <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #ddd;">
-                        <h4 style="color: #e53935; margin-bottom: 10px;">🛡️ Block Default Vhost (IP Access)</h4>
+                        <h4 style="color: #C62828; margin-bottom: 10px;">🛡️ Block Default Vhost (IP Access)</h4>
                         <p style="font-size: 13px; color: #666; margin-bottom: 8px;">Prevent access via IP or unknown hostnames:</p>
                         <code style="display:block; background: #2d3748; color: #68d391; padding: 12px; border-radius: 8px; font-size: 11px; margin-bottom: 8px; white-space: pre; overflow-x: auto;"># Create catch-all vhost (run as root)
 cat > /etc/apache2/sites-available/000-default.conf &lt;&lt;'EOF'
@@ -3655,7 +3894,7 @@ systemctl reload apache2</code>
         </div><!-- End Settings Tab -->
 
         <!-- Audit Log Tab (Admin Only) -->
-        <div class="tab-content" id="audit-tab">
+        <div class="tab-content" id="audit-tab" role="tabpanel" aria-labelledby="tabbtn-audit">
             <div class="settings-section">
                 <h2>📊 Audit Log</h2>
 
@@ -3690,7 +3929,7 @@ systemctl reload apache2</code>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px;">
                         <div>
                             <label style="display: block; font-size: 12px; color: #666; margin-bottom: 5px;">User</label>
-                            <select id="audit-filter-user" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
+                            <select id="audit-filter-user" aria-label="Filter by user" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
                                 <option value="">All Users</option>
                                 <?php foreach ($auditOptions['users'] as $user): ?>
                                     <option value="<?= htmlspecialchars($user) ?>"><?= htmlspecialchars($user) ?></option>
@@ -3699,7 +3938,7 @@ systemctl reload apache2</code>
                         </div>
                         <div>
                             <label style="display: block; font-size: 12px; color: #666; margin-bottom: 5px;">Action</label>
-                            <select id="audit-filter-action" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
+                            <select id="audit-filter-action" aria-label="Filter by action" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
                                 <option value="">All Actions</option>
                                 <?php foreach ($auditOptions['actions'] as $action): ?>
                                     <option value="<?= htmlspecialchars($action) ?>"><?= htmlspecialchars($action) ?></option>
@@ -3712,7 +3951,7 @@ systemctl reload apache2</code>
                         </div>
                         <div>
                             <label style="display: block; font-size: 12px; color: #666; margin-bottom: 5px;">Country</label>
-                            <select id="audit-filter-country" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
+                            <select id="audit-filter-country" aria-label="Filter by country" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px;">
                                 <option value="">All Countries</option>
                                 <?php foreach (array_keys($auditStats['countries']) as $country): ?>
                                     <option value="<?= htmlspecialchars($country === '' ? '_local_' : $country) ?>"><?= htmlspecialchars($country ?: 'Local') ?> (<?= $auditStats['countries'][$country] ?>)</option>
@@ -3725,19 +3964,19 @@ systemctl reload apache2</code>
                         </div>
                         <div>
                             <label style="display: block; font-size: 12px; color: #666; margin-bottom: 5px;">Date From</label>
-                            <input type="date" id="audit-filter-date-from" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; box-sizing: border-box;">
+                            <input type="date" id="audit-filter-date-from" aria-label="From date" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; box-sizing: border-box;">
                         </div>
                         <div>
                             <label style="display: block; font-size: 12px; color: #666; margin-bottom: 5px;">Date To</label>
-                            <input type="date" id="audit-filter-date-to" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; box-sizing: border-box;">
+                            <input type="date" id="audit-filter-date-to" aria-label="To date" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; box-sizing: border-box;">
                         </div>
                     </div>
                     <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
-                        <button onclick="loadAuditLog(1)" style="padding: 8px 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">Apply Filters</button>
+                        <button onclick="loadAuditLog(1)" style="padding: 8px 20px; background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">Apply Filters</button>
                         <button onclick="clearAuditFilters()" style="padding: 8px 20px; background: #6c757d; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">Clear Filters</button>
-                        <button onclick="exportAuditLog()" style="padding: 8px 20px; background: #28a745; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">📥 Export CSV</button>
+                        <button onclick="exportAuditLog()" style="padding: 8px 20px; background: #1E7E34; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">📥 Export CSV</button>
                         <span style="border-left: 1px solid #ddd; margin: 0 4px;"></span>
-                        <button onclick="purgeAuditLogs(30)" style="padding: 8px 20px; background: #fd7e14; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;" title="Delete entries older than 30 days">🗑️ Delete &gt;30d</button>
+                        <button onclick="purgeAuditLogs(30)" style="padding: 8px 20px; background: #C2410C; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;" title="Delete entries older than 30 days">🗑️ Delete &gt;30d</button>
                         <button onclick="purgeAuditLogs(7)" style="padding: 8px 20px; background: #dc3545; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;" title="Delete entries older than 7 days">🗑️ Delete &gt;7d</button>
                     </div>
                 </div>
@@ -3747,7 +3986,7 @@ systemctl reload apache2</code>
                     <div id="audit-results-info" style="color: #666; font-size: 14px;">Loading...</div>
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <label style="font-size: 13px; color: #666;">Per page:</label>
-                        <select id="audit-per-page" onchange="loadAuditLog(1)" style="padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px;">
+                        <select id="audit-per-page" aria-label="Entries per page" onchange="loadAuditLog(1)" style="padding: 6px 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px;">
                             <option value="25">25</option>
                             <option value="50">50</option>
                             <option value="100">100</option>
@@ -3769,7 +4008,7 @@ systemctl reload apache2</code>
                             </tr>
                         </thead>
                         <tbody id="audit-tbody">
-                            <tr><td colspan="6" style="text-align: center; padding: 40px; color: #999;">Loading...</td></tr>
+                            <tr><td colspan="6" style="text-align: center; padding: 40px; color: #6B6B6B;">Loading...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -3784,13 +4023,13 @@ systemctl reload apache2</code>
         <?php endif; ?>
 
         <!-- Sessions Tab -->
-        <div class="tab-content" id="sessions-tab">
+        <div class="tab-content" id="sessions-tab" role="tabpanel" aria-labelledby="tabbtn-sessions">
             <div class="settings-section">
                 <h2>🔐 Sessions</h2>
                 <p style="color:#666; margin-bottom:20px;">Manage active login sessions. Closing a session will log out that device immediately.</p>
 
-                <div id="sessions-list">
-                    <p style="color:#999;">Loading sessions...</p>
+                <div id="sessions-list" style="min-height: 320px;" aria-busy="true">
+                    <p style="color: #6B6B6B;">Loading sessions...</p>
                 </div>
 
                 <div style="margin-top: 20px; display: flex; gap: 10px; flex-wrap: wrap;">
@@ -3815,6 +4054,7 @@ systemctl reload apache2</code>
                 </div>
             </div>
         </div><!-- End Sessions Tab -->
+        </main>
     </div>
 
     <script src="assets/quill/quill.js"></script>
@@ -3831,27 +4071,27 @@ systemctl reload apache2</code>
 
         // Action colors for audit log
         var actionColors = {
-            'upload': '#4CAF50',
-            'public_upload': '#8BC34A',
-            'download': '#2196F3',
-            'public_download': '#03A9F4',
-            'download_decrypted': '#00BCD4',
-            'delete': '#f44336',
-            'rename': '#ff9800',
-            'move': '#FF5722',
+            'upload': '#2E7D32',
+            'public_upload': '#33691E',
+            'download': '#1565C0',
+            'public_download': '#0277BD',
+            'download_decrypted': '#00838F',
+            'delete': '#C62828',
+            'rename': '#B45309',
+            'move': '#BF360C',
             'settings': '#9c27b0',
-            'user_add': '#4CAF50',
-            'user_delete': '#f44336',
-            'user_password': '#ff9800',
-            'text_create': '#00bcd4',
-            'text_update': '#009688',
-            'text_extend': '#26A69A',
-            'text_delete': '#f44336',
+            'user_add': '#2E7D32',
+            'user_delete': '#C62828',
+            'user_password': '#B45309',
+            'text_create': '#00838F',
+            'text_update': '#00796B',
+            'text_extend': '#00695C',
+            'text_delete': '#C62828',
             'share_create': '#3f51b5',
-            'share_revoke': '#E91E63',
+            'share_revoke': '#C2185B',
             'login': '#673AB7',
             'folder_create': '#795548',
-            'folder_delete': '#9E9E9E'
+            'folder_delete': '#616161'
         };
 
         // Escape HTML for safe display
@@ -3871,7 +4111,7 @@ systemctl reload apache2</code>
 
             if (!tbody) return;
 
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #999;">Loading...</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #6B6B6B;">Loading...</td></tr>';
 
             var params = new URLSearchParams({
                 audit_action: 'fetch',
@@ -3899,12 +4139,12 @@ systemctl reload apache2</code>
                         resultsInfo.textContent = 'Showing ' + data.entries.length + ' of ' + data.filtered + ' entries' +
                             (data.filtered !== data.total ? ' (filtered from ' + data.total + ' total)' : '');
                     } else {
-                        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #e74c3c;">Error: ' + (data.error || 'Unknown error') + '</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #C62828;">Error: ' + (data.error || 'Unknown error') + '</td></tr>';
                     }
                 })
                 .catch(function(error) {
                     console.error('Audit log error:', error);
-                    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #e74c3c;">Error loading audit log: ' + error.message + '</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #C62828;">Error loading audit log: ' + error.message + '</td></tr>';
                 });
         }
 
@@ -3913,7 +4153,7 @@ systemctl reload apache2</code>
             var tbody = document.getElementById('audit-tbody');
 
             if (entries.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #999;">No entries found</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; padding: 40px; color: #6B6B6B;">No entries found</td></tr>';
                 return;
             }
 
@@ -3922,7 +4162,7 @@ systemctl reload apache2</code>
                 var entry = entries[i];
                 var color = actionColors[entry.action] || '#757575';
                 html += '<tr style="border-bottom: 1px solid #eee;">' +
-                    '<td style="padding: 10px; white-space: nowrap;">' + escapeHtml(entry.timestamp) + '</td>' +
+                    '<td style="padding: 10px; white-space: nowrap;">' + (entry.unix_time ? WS.formatDate(entry.unix_time, true) : escapeHtml(entry.timestamp)) + '</td>' +
                     '<td style="padding: 10px;"><span style="background: #e3f2fd; padding: 3px 8px; border-radius: 4px;">' + escapeHtml(entry.user) + '</span></td>' +
                     '<td style="padding: 10px;"><span style="background: ' + color + '; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px;">' + escapeHtml(entry.action) + '</span></td>' +
                     '<td style="padding: 10px; max-width: 300px; overflow: hidden; text-overflow: ellipsis;" title="' + escapeHtml(entry.details) + '">' + escapeHtml(entry.details) + '</td>' +
@@ -3960,7 +4200,7 @@ systemctl reload apache2</code>
 
             for (var i = startPage; i <= endPage; i++) {
                 var isActive = i === currentPage;
-                html += '<button onclick="loadAuditLog(' + i + ')" style="padding: 8px 12px; border: 1px solid ' + (isActive ? '#667eea' : '#ddd') + '; background: ' + (isActive ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' : 'white') + '; color: ' + (isActive ? 'white' : '#333') + '; border-radius: 4px; cursor: pointer; font-weight: ' + (isActive ? 'bold' : 'normal') + ';">' + i + '</button>';
+                html += '<button onclick="loadAuditLog(' + i + ')" style="padding: 8px 12px; border: 1px solid ' + (isActive ? '#4C51BF' : '#ddd') + '; background: ' + (isActive ? 'linear-gradient(135deg, #4C51BF 0%, #764ba2 100%)' : 'white') + '; color: ' + (isActive ? 'white' : '#333') + '; border-radius: 4px; cursor: pointer; font-weight: ' + (isActive ? 'bold' : 'normal') + ';">' + i + '</button>';
             }
 
             if (endPage < totalPages) {
@@ -3995,8 +4235,8 @@ systemctl reload apache2</code>
         }
 
         // Purge audit log entries older than keepDays days
-        function purgeAuditLogs(keepDays) {
-            if (!confirm('Delete all audit log entries older than ' + keepDays + ' days?\n\nEntries from the last ' + keepDays + ' days will be kept. This cannot be undone.')) return;
+        async function purgeAuditLogs(keepDays) {
+            if (!(await WS.confirm({ title: 'Delete audit entries older than ' + keepDays + ' days?', message: 'Entries from the last ' + keepDays + ' days are kept. This cannot be undone.', confirmText: 'Delete old entries', danger: true }))) return;
             fetch('?audit_action=purge&keep_days=' + keepDays, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -4005,15 +4245,15 @@ systemctl reload apache2</code>
             .then(r => { if (r.status === 401) { window.location.href = '/login.php'; return Promise.reject('expired'); } return r.json(); })
             .then(data => {
                 if (data.success) {
-                    alert('Deleted ' + data.deleted + ' entries. Kept last ' + data.kept_days + ' days.');
+                    WS.flash('Deleted ' + data.deleted + ' entries. Kept last ' + data.kept_days + ' days.', 'success');
                     loadAuditLog(1);
                     // Reload page to refresh stats counters
                     setTimeout(() => window.location.href = '/?tab=audit', 800);
                 } else {
-                    alert('Error: ' + (data.error || 'Unknown'));
+                    WS.toast('Error: ' + (data.error || 'Unknown'), 'error');
                 }
             })
-            .catch(e => { if (e !== 'expired') alert('Request failed'); });
+            .catch(e => { if (e !== 'expired') WS.toast('Request failed', 'error'); });
         }
 
         // Session management
@@ -4031,36 +4271,37 @@ systemctl reload apache2</code>
 
         function renderSessions(sessions) {
             if (!sessions || sessions.length === 0) {
-                document.getElementById('sessions-list').innerHTML = '<p style="color:#999;">No active sessions found.</p>';
+                document.getElementById('sessions-list').innerHTML = '<p style="color: #6B6B6B;">No active sessions found.</p>';
                 return;
             }
             let html = '<table style="width:100%; border-collapse:collapse; font-size:14px;">';
-            html += '<thead><tr style="background:#f5f5f5;"><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">User</th><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">IP</th><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">Device</th><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">Last Active</th><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">Remember</th><th style="padding:10px; border-bottom:2px solid #eee;"></th></tr></thead><tbody>';
+            html += '<thead><tr style="background:#f5f5f5;"><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">User</th><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">IP</th><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">Device</th><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">Last Active</th><th style="padding:10px; text-align:left; border-bottom:2px solid #eee;">Remember</th><th style="padding:10px; border-bottom:2px solid #eee;"><span class="sr-only">Actions</span></th></tr></thead><tbody>';
             sessions.forEach(s => {
                 const isCurrent = s.current;
                 const bg = isCurrent ? '#e8f5e9' : 'white';
                 const ua = s.user_agent || '';
-                let device = ua.length > 60 ? ua.substring(0, 60) + '…' : ua;
-                const lastActive = s.last_active ? new Date(s.last_active * 1000).toLocaleString() : '?';
-                const remember = s.remember_me ? '✅' : '—';
+                const device = WS.describeUA(ua);
+                const lastActive = s.last_active ? WS.formatDate(s.last_active) : '?';
+                const remember = s.remember_me ? '<span aria-label="Yes">✅</span>' : '<span aria-label="No">—</span>';
                 html += `<tr style="background:${bg}; border-bottom:1px solid #f0f0f0;">`;
-                html += `<td style="padding:10px;">${escHtml(s.username)}${isCurrent ? ' <span style="background:#4CAF50;color:white;padding:2px 6px;border-radius:10px;font-size:11px;">current</span>' : ''}</td>`;
+                html += `<td style="padding:10px;">${escHtml(s.username)}${isCurrent ? ' <span style="background:#2E7D32;color:white;padding:2px 6px;border-radius:10px;font-size:11px;">current</span>' : ''}</td>`;
                 html += `<td style="padding:10px;">${escHtml(s.ip || '?')}</td>`;
-                html += `<td style="padding:10px; color:#666; font-size:12px;">${escHtml(device)}</td>`;
+                html += `<td style="padding:10px; color:#555; font-size:13px;" title="${escHtml(ua)}">${escHtml(device)}</td>`;
                 html += `<td style="padding:10px;">${lastActive}</td>`;
                 html += `<td style="padding:10px; text-align:center;">${remember}</td>`;
                 html += `<td style="padding:10px;">`;
                 if (!isCurrent) {
-                    html += `<button class="btn" style="background:#dc3545;padding:5px 12px;font-size:12px;" onclick="closeSession('${escHtml(s.id)}')">Close</button>`;
+                    html += `<button class="btn" style="background:#dc3545;padding:5px 12px;font-size:12px;" onclick="closeSession('${escHtml(s.id)}')" aria-label="Close session of ${escHtml(s.username)} from ${escHtml(s.ip || '?')}">Close</button>`;
                 }
                 html += `</td></tr>`;
             });
             html += '</tbody></table>';
             document.getElementById('sessions-list').innerHTML = html;
+            document.getElementById('sessions-list').removeAttribute('aria-busy');
         }
 
-        function closeSession(sessionId) {
-            if (!confirm('Close this session?')) return;
+        async function closeSession(sessionId) {
+            if (!(await WS.confirm({ title: 'Close this session?', message: 'That device will be logged out immediately.', confirmText: 'Close session', danger: true }))) return;
             fetch('?session_action=close', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/x-www-form-urlencoded'},
@@ -4069,19 +4310,19 @@ systemctl reload apache2</code>
                 if (data.success) {
                     if (data.redirect) window.location.href = data.redirect;
                     else loadSessions();
-                } else alert('Error: ' + (data.error || 'Unknown'));
+                } else WS.toast('Error: ' + (data.error || 'Unknown'), 'error');
             });
         }
 
-        function sessionsLogoffAll() {
-            if (!confirm('Log off ALL sessions? You will be redirected to login.')) return;
+        async function sessionsLogoffAll() {
+            if (!(await WS.confirm({ title: 'Log off all sessions?', message: 'Every device, including this one, will be logged out. You will be redirected to the login page.', confirmText: 'Log off all', danger: true }))) return;
             fetch('?session_action=logoff_all', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/x-www-form-urlencoded'},
                 body: 'csrf_token=' + encodeURIComponent(csrfToken)
             }).then(r => r.json()).then(data => {
                 if (data.success) window.location.href = data.redirect || '/login.php';
-                else alert('Error: ' + (data.error || 'Unknown'));
+                else WS.toast('Error: ' + (data.error || 'Unknown'), 'error');
             });
         }
 
@@ -4541,7 +4782,7 @@ systemctl reload apache2</code>
                 if (result.success) {
                     progressBar.style.animation = 'none';
                     progressBar.textContent = 'Готово! ' + result.filename + ' (' + result.sizeFormatted + ')';
-                    progressBar.style.background = 'linear-gradient(135deg, #4CAF50 0%, #45a049 100%)';
+                    progressBar.style.background = 'linear-gradient(135deg, #2E7D32 0%, #1B5E20 100%)';
 
                     // Reset after 2 seconds and reload
                     setTimeout(() => {
@@ -4812,18 +5053,18 @@ systemctl reload apache2</code>
                     document.getElementById('newKeyName').value = '';
                     document.getElementById('newKeyIps').value = '';
                 } else {
-                    alert('Error: ' + (data.error || 'Failed to generate key'));
+                    WS.toast('Error: ' + (data.error || 'Failed to generate key'), 'error');
                 }
             })
             .catch(error => {
-                alert('Network error: ' + error.message);
+                WS.toast('Network error: ' + error.message, 'error');
             });
         }
 
         function copyNewKey() {
             const key = document.getElementById('newKeyValue').textContent;
             navigator.clipboard.writeText(key).then(() => {
-                alert('Key copied to clipboard!');
+                WS.toast('Key copied to clipboard!', 'success');
             });
         }
 
@@ -4833,8 +5074,8 @@ systemctl reload apache2</code>
             location.reload();
         }
 
-        function revokeKey(keyId, keyName) {
-            if (!confirm('Are you sure you want to revoke the API key "' + keyName + '"?\n\nThis cannot be undone.')) {
+        async function revokeKey(keyId, keyName) {
+            if (!(await WS.confirm({ title: 'Revoke API key "' + keyName + '"?', message: 'Scripts using this key will stop working. This cannot be undone.', confirmText: 'Revoke key', danger: true }))) {
                 return;
             }
 
@@ -4859,11 +5100,11 @@ systemctl reload apache2</code>
                         location.reload();
                     }
                 } else {
-                    alert('Error: ' + (data.error || 'Failed to revoke key'));
+                    WS.toast('Error: ' + (data.error || 'Failed to revoke key'), 'error');
                 }
             })
             .catch(error => {
-                alert('Network error: ' + error.message);
+                WS.toast('Network error: ' + error.message, 'error');
             });
         }
 
@@ -4887,11 +5128,11 @@ systemctl reload apache2</code>
                 if (data.success) {
                     location.reload();
                 } else {
-                    alert('Error: ' + (data.error || 'Failed to update IPs'));
+                    WS.toast('Error: ' + (data.error || 'Failed to update IPs'), 'error');
                 }
             })
             .catch(error => {
-                alert('Network error: ' + error.message);
+                WS.toast('Network error: ' + error.message, 'error');
             });
         }
 
@@ -4912,7 +5153,7 @@ systemctl reload apache2</code>
         function showEmailModal(index, filename) {
             const urlInput = document.getElementById('url-' + index);
             if (!urlInput || !urlInput.value) {
-                alert('Please generate a share link first by clicking the Share button.');
+                WS.toast('Please generate a share link first by clicking the Share button.', 'warning');
                 return;
             }
 
@@ -4978,22 +5219,22 @@ systemctl reload apache2</code>
             // Show update source
             const source = updateData.source || 'unknown';
             const sourceLabel = source === 'github' ? 'GitHub (stable)' : (source === 'dev' ? 'Dev Server (beta)' : source);
-            const sourceColor = source === 'github' ? '#4CAF50' : '#ff9800';
+            const sourceColor = source === 'github' ? '#2E7D32' : '#B45309';
             html += '<p style="margin: 5px 0; font-size: 11px;"><span style="background: ' + sourceColor + '; color: white; padding: 2px 8px; border-radius: 10px; font-size: 10px;">' + sourceLabel + '</span></p>';
 
             if (updateData.error && !updateData.latest_version) {
-                html += '<p style="color: #f44336;">' + updateData.error + '</p>';
+                html += '<p style="color: #C62828;">' + updateData.error + '</p>';
             } else if (updateData.update_available) {
-                html += '<p style="margin: 5px 0;"><strong>Latest Version:</strong> <span style="color: #4CAF50; font-weight: bold;">v' + updateData.latest_version + '</span></p>';
-                html += '<p style="color: #4CAF50; margin: 15px 0;">New version available!</p>';
+                html += '<p style="margin: 5px 0;"><strong>Latest Version:</strong> <span style="color: #2E7D32; font-weight: bold;">v' + updateData.latest_version + '</span></p>';
+                html += '<p style="color: #2E7D32; margin: 15px 0;">New version available!</p>';
             } else {
                 html += '<p style="margin: 5px 0;"><strong>Latest Version:</strong> v' + (updateData.latest_version || currentVersion) + '</p>';
-                html += '<p style="color: #888; margin: 15px 0;">You are running the latest version.</p>';
+                html += '<p style="color: #6B6B6B; margin: 15px 0;">You are running the latest version.</p>';
             }
 
             if (updateData.from_cache) {
                 const ageMinutes = Math.round((updateData.cache_age || 0) / 60);
-                html += '<p style="font-size: 11px; color: #999;">Last checked: ' + (ageMinutes < 60 ? ageMinutes + ' minutes ago' : Math.round(ageMinutes/60) + ' hours ago') + '</p>';
+                html += '<p style="font-size: 11px; color: #6B6B6B;">Last checked: ' + (ageMinutes < 60 ? ageMinutes + ' minutes ago' : Math.round(ageMinutes/60) + ' hours ago') + '</p>';
             }
 
             html += '</div>';
@@ -5015,7 +5256,7 @@ systemctl reload apache2</code>
                 liveUpdateBtn.style.display = 'inline-block';
                 // Change color if update available
                 if (updateData.update_available) {
-                    liveUpdateBtn.style.background = '#4CAF50';
+                    liveUpdateBtn.style.background = '#2E7D32';
                     liveUpdateBtn.textContent = 'Live Update ↑';
                 } else {
                     liveUpdateBtn.style.background = '#607D8B';
@@ -5050,14 +5291,14 @@ systemctl reload apache2</code>
                 const versionLink = document.getElementById('versionLink');
                 if (versionLink && updateData.update_available) {
                     versionLink.style.color = '#e65100';
-                    versionLink.innerHTML = 'v<?= WEBSHARE_VERSION ?> <span style="color:#4CAF50;font-size:10px;">↑</span>';
+                    versionLink.innerHTML = 'v<?= WEBSHARE_VERSION ?> <span style="color:#2E7D32;font-size:10px;">↑</span>';
                     versionLink.title = 'Update available: v' + updateData.latest_version + ' (click to update)';
                 }
 
                 renderUpdateModal();
             } catch (error) {
                 if (content) {
-                    content.innerHTML = '<p style="text-align: center; color: #f44336;">Failed to check for updates</p>';
+                    content.innerHTML = '<p style="text-align: center; color: #C62828;">Failed to check for updates</p>';
                 }
             }
 
@@ -5083,7 +5324,7 @@ systemctl reload apache2</code>
         }
 
         async function doLiveUpdate() {
-            if (!confirm('This will update WebShare from webshare.techbg.net. Continue?')) return;
+            if (!(await WS.confirm({ title: 'Update WebShare now?', message: 'Files will be downloaded from webshare.techbg.net and replaced. A backup is created first.', confirmText: 'Update' }))) return;
 
             const content = document.getElementById('updateContent');
             const liveUpdateBtn = document.getElementById('liveUpdateBtn');
@@ -5108,13 +5349,13 @@ systemctl reload apache2</code>
                     if (result.steps) {
                         result.steps.forEach(step => {
                             const icon = step.status === 'done' ? '✓' : (step.status === 'failed' ? '✗' : '...');
-                            const color = step.status === 'done' ? '#4CAF50' : (step.status === 'failed' ? '#f44336' : '#666');
+                            const color = step.status === 'done' ? '#2E7D32' : (step.status === 'failed' ? '#C62828' : '#666');
                             html += '<p style="margin: 5px 0; color: ' + color + ';">' + icon + ' ' + step.step;
-                            if (step.detail) html += ' <span style="color:#888;">(' + step.detail + ')</span>';
+                            if (step.detail) html += ' <span style="color: #6B6B6B;">(' + step.detail + ')</span>';
                             html += '</p>';
                         });
                     }
-                    html += '<p style="margin: 15px 0 5px 0; color: #4CAF50; font-weight: bold; text-align: center;">Update complete!</p>';
+                    html += '<p style="margin: 15px 0 5px 0; color: #2E7D32; font-weight: bold; text-align: center;">Update complete!</p>';
                     html += '<p style="color: #666; text-align: center; font-size: 12px;">Reloading in 2 seconds...</p>';
                     html += '</div>';
                     content.innerHTML = html;
@@ -5127,11 +5368,11 @@ systemctl reload apache2</code>
                     if (result.steps) {
                         result.steps.forEach(step => {
                             const icon = step.status === 'done' ? '✓' : (step.status === 'failed' ? '✗' : '...');
-                            const color = step.status === 'done' ? '#4CAF50' : (step.status === 'failed' ? '#f44336' : '#666');
+                            const color = step.status === 'done' ? '#2E7D32' : (step.status === 'failed' ? '#C62828' : '#666');
                             html += '<p style="margin: 5px 0; color: ' + color + ';">' + icon + ' ' + step.step + '</p>';
                         });
                     }
-                    html += '<p style="margin: 15px 0 5px 0; color: #f44336; text-align: center;">Update failed</p>';
+                    html += '<p style="margin: 15px 0 5px 0; color: #C62828; text-align: center;">Update failed</p>';
                     html += '<p style="color: #666; text-align: center; font-size: 12px;">' + (result.error || 'Unknown error') + '</p>';
                     html += '</div>';
                     content.innerHTML = html;
@@ -5140,7 +5381,7 @@ systemctl reload apache2</code>
                     checkBtn.disabled = false;
                 }
             } catch (error) {
-                content.innerHTML = '<p style="text-align: center; color: #f44336;">Update failed: ' + error.message + '</p>';
+                content.innerHTML = '<p style="text-align: center; color: #C62828;">Update failed: ' + error.message + '</p>';
                 hideUpdateOverlay();
                 liveUpdateBtn.disabled = false;
                 checkBtn.disabled = false;
@@ -5395,10 +5636,25 @@ systemctl reload apache2</code>
         async function deleteFile(filename) {
             const err = await requestFileDelete(filename);
             if (err) {
-                alert('Could not delete "' + filename + '": ' + err);
+                WS.toast('Could not delete "' + filename + '": ' + err, 'error');
                 return;
             }
             window.location.reload();
+        }
+
+        // Delete a user only after showing what will be lost (account + all files)
+        function confirmUserDelete(event, form) {
+            event.preventDefault();
+            const files = parseInt(form.dataset.files, 10) || 0;
+            WS.confirm({
+                title: 'Delete user "' + form.dataset.user + '"?',
+                message: files
+                    ? 'The account, its sessions and ALL ' + files + ' files (' + form.dataset.size + ') in its folder will be deleted permanently.'
+                    : 'The account and its sessions will be deleted. The folder is empty.',
+                confirmText: 'Delete user',
+                danger: true
+            }).then(ok => { if (ok) form.submit(); });
+            return false;
         }
 
         function getSelectedFiles() {
@@ -5428,6 +5684,14 @@ systemctl reload apache2</code>
         async function deleteSelectedFiles() {
             const files = getSelectedFiles();
             if (files.length === 0) return;
+            const ok = await WS.confirm({
+                title: files.length === 1 ? 'Delete 1 file?' : 'Delete ' + files.length + ' files?',
+                message: 'This cannot be undone.',
+                items: files,
+                confirmText: files.length === 1 ? 'Delete file' : 'Delete ' + files.length + ' files',
+                danger: true
+            });
+            if (!ok) return;
             const btn = document.getElementById('bulkDeleteBtn');
             if (btn) btn.disabled = true;
 
@@ -5438,7 +5702,9 @@ systemctl reload apache2</code>
             }
 
             if (errors.length) {
-                alert('Some files could not be deleted:\n\n' + errors.join('\n'));
+                WS.flash('Some files could not be deleted:\n' + errors.join('\n'), 'error');
+            } else {
+                WS.flash(files.length === 1 ? '1 file deleted' : files.length + ' files deleted', 'success');
             }
             window.location.reload();
         }
@@ -5473,7 +5739,7 @@ systemctl reload apache2</code>
 
                 // Warn if approaching limit
                 if (length > 900000) {
-                    document.getElementById('charCount').style.color = '#f44336';
+                    document.getElementById('charCount').style.color = '#C62828';
                 } else {
                     document.getElementById('charCount').style.color = '#666';
                 }
@@ -5481,6 +5747,18 @@ systemctl reload apache2</code>
         }
 
         // Tab switching function
+        // Arrow keys move between tabs (WAI-ARIA tabs pattern)
+        document.addEventListener('keydown', e => {
+            const cur = e.target.closest && e.target.closest('[role=tab]');
+            if (!cur || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+            const tabs = [...document.querySelectorAll('[role=tab]')];
+            let i = tabs.indexOf(cur);
+            i = e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : (i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+            e.preventDefault();
+            tabs[i].click();
+            tabs[i].focus();
+        });
+
         function switchTab(tabName) {
             // Hide all tabs
             document.querySelectorAll('.tab-content').forEach(tab => {
@@ -5495,12 +5773,12 @@ systemctl reload apache2</code>
             // Show selected tab
             document.getElementById(tabName + '-tab').classList.add('active');
 
-            // Add active class to correct button
+            // Mark the active tab button (visual + ARIA + roving tabindex)
             document.querySelectorAll('.tab').forEach(btn => {
-                const tabMap = {'files': 'Files', 'texts': 'Chats', 'help': 'Help', 'settings': 'Settings', 'audit': 'Audit', 'sessions': 'Sessions'};
-                if (btn.textContent.includes(tabMap[tabName])) {
-                    btn.classList.add('active');
-                }
+                const on = btn.dataset.tab === tabName;
+                btn.classList.toggle('active', on);
+                btn.setAttribute('aria-selected', on ? 'true' : 'false');
+                btn.tabIndex = on ? 0 : -1;
             });
 
             localStorage.setItem('activeTab', tabName);
@@ -5623,7 +5901,7 @@ systemctl reload apache2</code>
             }
 
             if (text.length > 1000000) {
-                alert('Text too large. Maximum 1,000,000 characters.');
+                WS.toast('Text too large. Maximum 1,000,000 characters.', 'warning');
                 return;
             }
 
@@ -5971,15 +6249,15 @@ systemctl reload apache2</code>
 
                     // Copy to clipboard
                     navigator.clipboard.writeText(data.url);
-                    alert(data.updated ? 'Споделянето е обновено!' : 'Папката е споделена! Линкът е копиран.');
+                    if (data.updated) WS.toast('Споделянето е обновено!', 'success'); else WS.flash('Папката е споделена! Линкът е копиран.', 'success');
 
                     // Reload to update share badges
                     if (!data.updated) location.reload();
                 } else {
-                    alert('Грешка: ' + (data.error || 'Unknown error'));
+                    WS.toast('Грешка: ' + (data.error || 'Unknown error'), 'error');
                 }
             } catch (error) {
-                alert('Грешка при споделяне');
+                WS.toast('Грешка при споделяне', 'error');
             }
         }
 
@@ -5987,11 +6265,11 @@ systemctl reload apache2</code>
             const input = document.getElementById('folderShareUrlInput');
             input.select();
             navigator.clipboard.writeText(input.value);
-            alert('Линкът е копиран!');
+            WS.toast('Линкът е копиран!', 'success');
         }
 
         async function deleteFolderShare() {
-            if (!confirm('Сигурен ли си, че искаш да премахнеш споделянето?')) return;
+            if (!(await WS.confirm({ title: 'Премахване на споделянето?', message: 'Линкът към папката спира да работи веднага.', confirmText: 'Премахни', cancelText: 'Отказ', danger: true }))) return;
 
             const formData = new FormData();
             formData.append('delete_folder_share', currentShareFolderToken);
@@ -6005,18 +6283,18 @@ systemctl reload apache2</code>
 
                 const data = await response.json();
                 if (data.success) {
-                    alert('Споделянето е премахнато');
+                    WS.flash('Споделянето е премахнато', 'success');
                     location.reload();
                 } else {
-                    alert('Грешка: ' + (data.error || 'Unknown error'));
+                    WS.toast('Грешка: ' + (data.error || 'Unknown error'), 'error');
                 }
             } catch (error) {
-                alert('Грешка при премахване');
+                WS.toast('Грешка при премахване', 'error');
             }
         }
 
         async function regenerateFolderToken() {
-            if (!confirm('Това ще генерира нов линк и ще инвалидира стария. Продължи?')) return;
+            if (!(await WS.confirm({ title: 'Нов линк?', message: 'Старият линк спира да работи. Хората, които го имат, трябва да получат новия.', confirmText: 'Генерирай', cancelText: 'Отказ' }))) return;
 
             const formData = new FormData();
             formData.append('regenerate_folder_token', currentShareFolderToken);
@@ -6033,12 +6311,12 @@ systemctl reload apache2</code>
                     currentShareFolderToken = data.new_token;
                     document.getElementById('folderShareUrlInput').value = data.new_url;
                     navigator.clipboard.writeText(data.new_url);
-                    alert('Новият линк е генериран и копиран!');
+                    WS.toast('Новият линк е генериран и копиран!', 'success');
                 } else {
-                    alert('Грешка: ' + (data.error || 'Unknown error'));
+                    WS.toast('Грешка: ' + (data.error || 'Unknown error'), 'error');
                 }
             } catch (error) {
-                alert('Грешка при генериране');
+                WS.toast('Грешка при генериране', 'error');
             }
         }
 
@@ -6050,7 +6328,7 @@ systemctl reload apache2</code>
 
         async function confirmMove() {
             if (!moveFileName || !selectedMoveFolder) {
-                alert('Please select a destination folder');
+                WS.toast('Please select a destination folder', 'warning');
                 return;
             }
 
@@ -6071,10 +6349,10 @@ systemctl reload apache2</code>
                     closeMoveModal();
                     window.location.reload();
                 } else {
-                    alert('Error: ' + (result.error || 'Failed to move file'));
+                    WS.toast('Error: ' + (result.error || 'Failed to move file'), 'error');
                 }
             } catch (error) {
-                alert('Error moving file');
+                WS.toast('Error moving file', 'error');
             }
         }
 
@@ -6269,7 +6547,7 @@ systemctl reload apache2</code>
         async function createSubfolderSubmit() {
             const folderName = document.getElementById('newFolderName').value.trim();
             if (!folderName) {
-                alert('Please enter a folder name');
+                WS.toast('Please enter a folder name', 'warning');
                 return;
             }
 
@@ -6290,15 +6568,15 @@ systemctl reload apache2</code>
                     closeCreateFolderModal();
                     window.location.reload();
                 } else {
-                    alert('Error: ' + (result.error || 'Failed to create folder'));
+                    WS.toast('Error: ' + (result.error || 'Failed to create folder'), 'error');
                 }
             } catch (error) {
-                alert('Error creating folder');
+                WS.toast('Error creating folder', 'error');
             }
         }
 
         async function deleteSubfolder(folderPath) {
-            if (!confirm('Delete folder "' + folderPath.split('/').pop() + '"? The folder must be empty.')) {
+            if (!(await WS.confirm({ title: 'Delete folder "' + folderPath.split('/').pop() + '"?', message: 'Only empty folders can be deleted.', confirmText: 'Delete folder', danger: true }))) {
                 return;
             }
 
@@ -6317,10 +6595,10 @@ systemctl reload apache2</code>
                 if (result.success) {
                     window.location.reload();
                 } else {
-                    alert('Error: ' + (result.error || 'Failed to delete folder'));
+                    WS.toast('Error: ' + (result.error || 'Failed to delete folder'), 'error');
                 }
             } catch (error) {
-                alert('Error deleting folder');
+                WS.toast('Error deleting folder', 'error');
             }
         }
 
@@ -6380,7 +6658,7 @@ systemctl reload apache2</code>
             </p>
             <input type="text" id="newFolderName" placeholder="Folder name"
                    style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 15px; font-size: 14px;">
-            <p style="font-size: 12px; color: #999; margin-bottom: 15px;">
+            <p style="font-size: 12px; color: #6B6B6B; margin-bottom: 15px;">
                 Allowed: letters, numbers, dash, underscore, space. Max 50 chars.
             </p>
             <div class="modal-buttons">
@@ -6430,8 +6708,8 @@ systemctl reload apache2</code>
 
             <div style="display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap;">
                 <button class="btn" style="background: #6c757d;" onclick="closeFolderShareModal()">Затвори</button>
-                <button class="btn" style="background: #e74c3c; display: none;" id="btnDeleteFolderShare" onclick="deleteFolderShare()">Премахни споделяне</button>
-                <button class="btn" style="background: #ff9800; display: none;" id="btnRegenerateFolderToken" onclick="regenerateFolderToken()">New ID</button>
+                <button class="btn" style="background: #C62828; display: none;" id="btnDeleteFolderShare" onclick="deleteFolderShare()">Премахни споделяне</button>
+                <button class="btn" style="background: #B45309; display: none;" id="btnRegenerateFolderToken" onclick="regenerateFolderToken()">New ID</button>
                 <button class="btn" id="btnCreateFolderShare" onclick="createFolderShare()">Сподели</button>
             </div>
         </div>
@@ -6540,7 +6818,7 @@ systemctl reload apache2</code>
             <div id="emailStatus" style="display: none; padding: 10px; border-radius: 6px; margin-bottom: 15px;"></div>
             <div class="modal-buttons">
                 <button class="btn" style="background: #6c757d;" onclick="closeEmailModal()">Cancel</button>
-                <button class="btn" style="background: #2196F3;" onclick="sendShareEmail()" id="sendEmailBtn">Send Email</button>
+                <button class="btn" style="background: #1565C0;" onclick="sendShareEmail()" id="sendEmailBtn">Send Email</button>
             </div>
         </div>
     </div>
@@ -6565,7 +6843,7 @@ systemctl reload apache2</code>
             </div>
             <div class="modal-buttons" style="margin-top: 20px;">
                 <button id="liveUpdateBtn" class="btn" style="background: #607D8B;" onclick="doLiveUpdate()">Force Update</button>
-                <button id="checkUpdateBtn" class="btn" style="background: #2196F3;" onclick="checkForUpdates(true)">Check Now</button>
+                <button id="checkUpdateBtn" class="btn" style="background: #1565C0;" onclick="checkForUpdates(true)">Check Now</button>
                 <button class="btn" style="background: #6c757d;" onclick="closeUpdateModal()">Close</button>
             </div>
         </div>
@@ -6610,7 +6888,7 @@ systemctl reload apache2</code>
                 </div>
             </div>
             <div class="modal-buttons">
-                <a href="CHANGELOG.md" target="_blank" class="btn" style="background: #2196F3; text-decoration: none;">Full Changelog</a>
+                <a href="CHANGELOG.md" target="_blank" class="btn" style="background: #1565C0; text-decoration: none;">Full Changelog</a>
                 <button class="btn" style="background: #6c757d;" onclick="closeChangelogModal()">Close</button>
             </div>
         </div>
@@ -6620,8 +6898,8 @@ systemctl reload apache2</code>
     <div class="modal" id="aboutModal">
         <div class="modal-content" style="max-width: 550px; max-height: 85vh; overflow-y: auto;">
             <div style="text-align: center; padding-bottom: 15px; border-bottom: 1px solid #eee;">
-                <h3 style="font-size: 32px; margin: 0; color: #1976D2;">WebShare</h3>
-                <p style="font-size: 14px; color: #888; margin: 5px 0;">Simple File Sharing System</p>
+                <h3 style="font-size: 32px; margin: 0; color: #1565C0;">WebShare</h3>
+                <p style="font-size: 14px; color: #6B6B6B; margin: 5px 0;">Simple File Sharing System</p>
                 <p style="font-size: 18px; color: #333; margin: 10px 0;">Version <?= WEBSHARE_VERSION ?></p>
             </div>
 
@@ -6667,14 +6945,14 @@ systemctl reload apache2</code>
                     <p style="margin: 5px 0;"><strong>v<?= htmlspecialchars($change['version']) ?></strong> - <?= htmlspecialchars($change['highlights']) ?></p>
                     <?php endforeach; ?>
                 </div>
-                <a href="CHANGELOG.md" target="_blank" style="display: inline-block; margin-top: 10px; font-size: 12px; color: #1976D2;">View full changelog →</a>
+                <a href="CHANGELOG.md" target="_blank" style="display: inline-block; margin-top: 10px; font-size: 12px; color: #1565C0;">View full changelog →</a>
             </div>
 
             <div style="text-align: center; padding-top: 15px; border-top: 1px solid #eee;">
                 <p style="margin: 5px 0; color: #555;">Created by <strong>Todor Karachorbadzhiev</strong></p>
-                <p style="margin: 5px 0; font-size: 12px;"><a href="mailto:webshare@techbg.net" style="color: #1976D2; text-decoration: none;">webshare@techbg.net</a></p>
-                <p style="margin: 5px 0; font-size: 12px; color: #999;">2025-2026</p>
-                <a href="https://github.com/toshko37/webshare" target="_blank" style="display: inline-block; margin-top: 10px; font-size: 13px; color: #1976D2; text-decoration: none;">
+                <p style="margin: 5px 0; font-size: 12px;"><a href="mailto:webshare@techbg.net" style="color: #1565C0; text-decoration: none;">webshare@techbg.net</a></p>
+                <p style="margin: 5px 0; font-size: 12px; color: #6B6B6B;">2025-2026</p>
+                <a href="https://github.com/toshko37/webshare" target="_blank" style="display: inline-block; margin-top: 10px; font-size: 13px; color: #1565C0; text-decoration: none;">
                     GitHub Repository →
                 </a>
             </div>

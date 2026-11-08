@@ -34,6 +34,7 @@ define('POLL_INTERVAL_HEARTBEAT', 10000); // 10 seconds
 
 // Security: HTML sanitizer
 require_once __DIR__ . '/html-sanitizer.php';
+require_once __DIR__ . '/error-page.php';
 
 // Include audit log
 require_once __DIR__ . '/audit-log.php';
@@ -716,9 +717,7 @@ if ($isViewMode) {
 
     // Check if exists (either format)
     if (!file_exists($jsonPath) && !file_exists($htmlPath)) {
-        http_response_code(404);
-        echo '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Not Found</title></head><body><h1>Conversation not found</h1><p>This conversation does not exist or has expired.</p></body></html>';
-        exit;
+        wsErrorPage(404, 'Разговорът не е намерен', 'Разговорът е изтекъл или линкът е сгрешен.');
     }
 
     // Load metadata and increment views
@@ -749,7 +748,7 @@ if ($isViewMode) {
 
     ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="bg">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -767,7 +766,7 @@ if ($isViewMode) {
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
             flex-direction: column;
@@ -787,7 +786,7 @@ if ($isViewMode) {
         }
 
         .chat-header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
             padding: 15px 20px;
             display: flex;
@@ -928,11 +927,11 @@ if ($isViewMode) {
         }
 
         .message-time {
-            color: #888;
+            color: #6B6B6B;
         }
 
         .message-edited {
-            color: #888;
+            color: #6B6B6B;
             font-style: italic;
         }
 
@@ -980,7 +979,7 @@ if ($isViewMode) {
 
         .message-deleted {
             font-style: italic;
-            color: #888;
+            color: #6B6B6B;
         }
 
         .message-actions {
@@ -1085,7 +1084,7 @@ if ($isViewMode) {
         }
 
         .notification-toggle.active {
-            background: #667eea;
+            background: #4C51BF;
             color: white;
         }
 
@@ -1129,14 +1128,14 @@ if ($isViewMode) {
 
         .urgent-hint {
             font-size: 12px;
-            color: #888;
+            color: #6B6B6B;
         }
 
         .send-btn {
             width: 50px;
             height: 50px;
             padding: 0;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
             border: none;
             border-radius: 50%;
@@ -1238,7 +1237,7 @@ if ($isViewMode) {
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
         }
 
@@ -1271,9 +1270,11 @@ if ($isViewMode) {
             }
         }
     </style>
+    <link rel="stylesheet" href="/ui-kit.css?v=<?= (int)@filemtime(__DIR__ . '/ui-kit.css') ?>">
+    <script src="/ui-kit.js?v=<?= (int)@filemtime(__DIR__ . '/ui-kit.js') ?>" defer></script>
 </head>
 <body>
-    <div class="chat-container">
+    <div class="chat-container" role="main">
         <div class="chat-header">
             <div class="chat-header-left">
                 <h1>Разговор</h1>
@@ -1302,7 +1303,7 @@ if ($isViewMode) {
             <div class="chat-input-top">
                 <div class="name-input-wrapper">
                     <input type="text" class="name-input" id="user-name" placeholder="Гост" maxlength="30">
-                    <span class="user-color-dot" id="user-color-dot"></span>
+                    <span class="user-color-dot" id="user-color-dot" role="img" aria-label="Цветът на твоите съобщения" title="Цветът на твоите съобщения"></span>
                 </div>
                 <div class="notification-toggles">
                     <button class="notification-toggle" id="sound-toggle" onclick="toggleSound()" title="Звукови известия">🔇</button>
@@ -1966,7 +1967,7 @@ if ($isViewMode) {
 // ========================================
 ?>
 <!DOCTYPE html>
-<html lang="en">
+<html lang="bg">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1984,7 +1985,7 @@ if ($isViewMode) {
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             min-height: 100vh;
             padding: 20px;
         }
@@ -1999,7 +2000,7 @@ if ($isViewMode) {
         }
 
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
             padding: 30px;
             text-align: center;
@@ -2017,12 +2018,12 @@ if ($isViewMode) {
 
         .info-box {
             background: #e3f2fd;
-            border-left: 4px solid #2196f3;
+            border-left: 4px solid #1565C0;
             padding: 15px 20px;
             margin: 20px 30px;
             border-radius: 6px;
             font-size: 14px;
-            color: #1976d2;
+            color: #1565C0;
         }
 
         .content-area {
@@ -2097,7 +2098,7 @@ if ($isViewMode) {
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
         }
 
@@ -2133,7 +2134,7 @@ if ($isViewMode) {
 
         .spinner {
             border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
+            border-top: 4px solid #4C51BF;
             border-radius: 50%;
             width: 40px;
             height: 40px;
@@ -2155,7 +2156,7 @@ if ($isViewMode) {
             border-radius: 25px;
             box-shadow: 0 2px 15px rgba(0,0,0,0.2);
             text-decoration: none;
-            color: #667eea;
+            color: #4C51BF;
             font-size: 14px;
             font-weight: 500;
             transition: all 0.3s;
@@ -2165,14 +2166,19 @@ if ($isViewMode) {
             transform: translateY(-2px);
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
         }
+    @media (max-width: 600px) {
+            .speedtest-link { position: static; display: table; margin: 0 0 12px auto; }
+        }
     </style>
+    <link rel="stylesheet" href="/ui-kit.css?v=<?= (int)@filemtime(__DIR__ . '/ui-kit.css') ?>">
+    <script src="/ui-kit.js?v=<?= (int)@filemtime(__DIR__ . '/ui-kit.js') ?>" defer></script>
 </head>
 <body>
     <?php if ($speedtestUrl): ?>
-    <a href="<?= htmlspecialchars($speedtestUrl) ?>" class="speedtest-link" target="_blank">Speed Test</a>
+    <div role="complementary" aria-label="Speed test"><a href="<?= htmlspecialchars($speedtestUrl) ?>" class="speedtest-link" target="_blank" rel="noopener">Speed Test</a></div>
     <?php endif; ?>
 
-    <div class="container">
+    <div class="container" role="main">
         <div class="header">
             <h1>Нов Разговор</h1>
             <p>Създай чат стая и сподели линка</p>
@@ -2187,7 +2193,7 @@ if ($isViewMode) {
                 <label class="name-label">Твоето Име</label>
                 <div class="name-input-wrapper">
                     <input type="text" class="name-input" id="author-name" placeholder="Гост" maxlength="30">
-                    <span class="user-color-dot" id="author-color-dot"></span>
+                    <span class="user-color-dot" id="author-color-dot" role="img" aria-label="Цветът на твоите съобщения" title="Цветът на твоите съобщения"></span>
                 </div>
             </div>
 

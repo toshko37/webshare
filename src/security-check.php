@@ -187,7 +187,7 @@ function _sc_pageHeader($title) {
     <title>' . $title . '</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
-        body{font-family:"Segoe UI",sans-serif;background:linear-gradient(135deg,#667eea,#764ba2);
+        body{font-family:"Segoe UI",sans-serif;background:linear-gradient(135deg,#4C51BF,#764ba2);
              min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
         .card{background:white;border-radius:12px;padding:36px;width:100%;max-width:460px;
               box-shadow:0 20px 60px rgba(0,0,0,.3)}
@@ -197,8 +197,8 @@ function _sc_pageHeader($title) {
         label{display:block;font-size:13px;font-weight:600;color:#555;margin-bottom:5px}
         input[type=text],input[type=password]{width:100%;padding:10px 13px;border:1.5px solid #ddd;
                border-radius:8px;font-size:14px;outline:none}
-        input:focus{border-color:#667eea}
-        .btn{width:100%;padding:12px;background:linear-gradient(135deg,#667eea,#764ba2);
+        input:focus{border-color:#4C51BF}
+        .btn{width:100%;padding:12px;background:linear-gradient(135deg,#4C51BF,#764ba2);
              color:white;border:none;border-radius:8px;font-size:15px;font-weight:600;
              cursor:pointer;margin-top:8px}
         .btn:hover{opacity:.9}

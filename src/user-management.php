@@ -114,8 +114,39 @@ function isAdmin($username = null) {
  * Get all active sessions with metadata
  * Returns array of session info, newest first
  */
+/**
+ * Remove session metadata whose PHP session no longer exists and which cannot
+ * be revived by a remember-me cookie. Without this, .sessions/ kept every login
+ * forever and the Sessions tab listed months-old dead entries (UI/UX audit X9).
+ * Entries active in the last hour are always kept to avoid races.
+ * @return int removed entries
+ */
+function cleanupDeadSessions() {
+    if (!is_dir(SESSIONS_DIR)) return 0;
+    $savePath = session_save_path() ?: ini_get('session.save_path') ?: '/var/lib/php/sessions';
+    if (strpos($savePath, ';') !== false) {
+        $savePath = substr($savePath, strrpos($savePath, ';') + 1);
+    }
+    $savePath = rtrim($savePath, '/');
+    if (!is_dir($savePath)) return 0; // cannot tell what is alive - remove nothing
+    $now = time();
+    $removed = 0;
+    foreach (glob(SESSIONS_DIR . '*.json') as $file) {
+        $meta = json_decode(file_get_contents($file), true);
+        if (!is_array($meta)) continue;
+        if (($meta['last_active'] ?? 0) > $now - 3600) continue;
+        if (!empty($meta['remember_me']) && ($meta['remember_expires'] ?? 0) > $now) continue;
+        $id = basename($file, '.json');
+        if (file_exists($savePath . '/sess_' . $id)) continue;
+        @unlink($file);
+        $removed++;
+    }
+    return $removed;
+}
+
 function getSessions() {
     if (!is_dir(SESSIONS_DIR)) return [];
+    cleanupDeadSessions();
     $sessions = [];
     $currentSessId = session_id();
 

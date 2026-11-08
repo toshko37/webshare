@@ -83,3 +83,13 @@ src/.mail-ratelimit.json
 src/.version-check.json
 src/.update-config.json
 src/GeoLite2-Country.mmdb
+
+# Upload guard runtime data (docs/upload-guard.md)
+src/.upload-passes/
+src/.upload-guard.key
+src/.upload-guard-state.json
+src/.upload-guard-on
+src/.upload-guard-curl-open
+
+# UI audit screenshots/metrics: contain real IPs, usernames and file names (public repo)
+docs/assets/

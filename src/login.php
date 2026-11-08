@@ -190,7 +190,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -210,7 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             margin-bottom: 30px;
         }
         .logo h1 { font-size: 28px; color: #333; font-weight: 700; }
-        .logo p  { color: #888; font-size: 14px; margin-top: 4px; }
+        .logo p  { color: #6B6B6B; font-size: 14px; margin-top: 4px; }
         .form-group { margin-bottom: 18px; }
         label {
             display: block;
@@ -230,7 +230,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             outline: none;
         }
         input[type="text"]:focus,
-        input[type="password"]:focus { border-color: #667eea; }
+        input[type="password"]:focus { border-color: #4C51BF; }
         .remember-row {
             display: flex;
             align-items: center;
@@ -247,12 +247,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             width: 16px;
             height: 16px;
             cursor: pointer;
-            accent-color: #667eea;
+            accent-color: #4C51BF;
         }
         .btn {
             width: 100%;
             padding: 13px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4C51BF 0%, #764ba2 100%);
             color: white;
             border: none;
             border-radius: 8px;
@@ -272,9 +272,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 14px;
         }
     </style>
+    <link rel="stylesheet" href="/ui-kit.css?v=<?= (int)@filemtime(__DIR__ . '/ui-kit.css') ?>">
+    <script src="/ui-kit.js?v=<?= (int)@filemtime(__DIR__ . '/ui-kit.js') ?>" defer></script>
 </head>
 <body>
-    <div class="card">
+    <div class="card" role="main">
         <div class="logo">
             <h1>📁 WebShare</h1>
             <p>Влезте в системата</p>

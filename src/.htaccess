@@ -13,6 +13,21 @@ AddType "text/plain; charset=utf-8" .md
 # URL Rewriting for clean URLs
 RewriteEngine On
 
+# Upload guard pre-filter (docs/upload-guard.md)
+# When anonymous uploads require verification (flag file .upload-guard-on exists),
+# reject upload POSTs that carry no pass at all BEFORE the request body is read.
+# This is only a cheap first filter: upload.php validates the pass itself.
+# Allowed through: ?guard=/?pass= query, X-Upload-Pass header, pass cookie,
+# login session cookies, and curl/wget when .upload-guard-curl-open exists.
+RewriteCond %{REQUEST_METHOD} =POST
+RewriteCond %{DOCUMENT_ROOT}/.upload-guard-on -f
+RewriteCond %{QUERY_STRING} !(^|&)(guard|pass)=
+RewriteCond %{HTTP:X-Upload-Pass} ^$
+RewriteCond %{HTTP_COOKIE} !(^|;\s*)(ws_upass|PHPSESSID|ws_remember)=
+RewriteCond %{DOCUMENT_ROOT}/.upload-guard-curl-open !-f [OR]
+RewriteCond %{HTTP_USER_AGENT} !(curl|wget) [NC]
+RewriteRule ^(u|u\.php|upload|upload\.php|u/[a-zA-Z0-9_-]+)$ - [F,L]
+
 # Rewrite /p to /p.php (preserve query string)
 RewriteRule ^p$ p.php [QSA,L]
 
@@ -92,7 +107,15 @@ Options -Indexes
 
 # PHP Configuration for large uploads
 # php_value moved to .user.ini (php-fpm, 2026-11-07); kept only for mod_php
-<IfModule mod_php8.c>
+# PHP 8 registers as mod_php.c, PHP 7 as mod_php7.c
+<IfModule mod_php.c>
+    php_value upload_max_filesize 10G
+    php_value post_max_size 10G
+    php_value max_execution_time 7200
+    php_value max_input_time 7200
+    php_value memory_limit 512M
+</IfModule>
+<IfModule mod_php7.c>
     php_value upload_max_filesize 10G
     php_value post_max_size 10G
     php_value max_execution_time 7200
