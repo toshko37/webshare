@@ -1,6 +1,6 @@
 {
-    "version": "3.9.0",
+    "version": "3.9.1",
     "released": "2026-11-09",
-    "changelog": "Signed releases, trash, quotas, chat protection, link previews",
+    "changelog": "Safe updates from older versions (upgrade bridge)",
     "download_url": "https://webshare.techbg.net/"
 }

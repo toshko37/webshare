@@ -2,6 +2,16 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.9.1] - 2026-11-09
+
+### Safe updates from older versions
+- **Fixed: updating from an older version broke the site.** Installs on 3.8.1 or older update through their own (old) live update, which downloads only the files it knows about. The new version needs files those lists do not contain, so the main page ended with a fatal error after such an update.
+- **Upgrade bridge.** `security-check.php` and `geo-check.php` are on every old list and load first. On the first page load they now download the missing files from the signed release, verify the signature and every file, and only then continue. If that is not possible, a page with the manual update command is shown instead of an error.
+
+### Before updating an older install from the web panel
+- **Untick "Use developer server (beta)"** in the update dialog if it is ticked. Updates come only from GitHub.
+- **Alternative: update from the shell.** `sudo /var/www/webshare/installer/update.sh -y` updates the files and also configures fail2ban, file permissions and the daily backup.
+
 ## [3.9.0] - 2026-11-09
 
 ### Signed releases (F5)
@@ -857,6 +867,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.9.1  | 2026-11-09 | Safe updates from older versions (upgrade bridge) |
 |  3.9.0  | 2026-11-09 | Signed releases, trash, quotas, chat protection, link previews |
 |  3.8.1  | 2026-11-09 | Upload Guard trusted networks, locked JSON storage |
 |  3.8.0  | 2026-11-08 | Encryption v2, hashed API keys, link expiry, CSP, installer hardening; GitHub-only updates |
