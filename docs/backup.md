@@ -37,7 +37,7 @@
 cp -a /var/backups/webshare/data/2026-11-08_2149/files/admin/name.pdf /var/www/webshare/files/admin/
 
 # Цяла папка на потребител
-rsync -a /var/backups/webshare/data/<snapshot>/files/dimo/ /var/www/webshare/files/dimo/
+rsync -a /var/backups/webshare/data/<snapshot>/files/alice/ /var/www/webshare/files/alice/
 
 # Метаданни (в отделна папка, после се копира нужният файл)
 mkdir /tmp/restore && tar -xzf /var/backups/webshare/meta/meta-<дата>.tar.gz -C /tmp/restore

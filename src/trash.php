@@ -115,7 +115,7 @@ function trash_attach_metadata($folder, $name, $item) {
 
 /**
  * Move a file to the trash. $folder is the folder path relative to files/
- * (e.g. "dimo", "dimo/sub", "_public"); null only for very old root files.
+ * (e.g. "alice", "alice/sub", "_public"); null only for very old root files.
  */
 function trash_move_file($folder, $name, $deletedBy) {
     $name = basename($name);

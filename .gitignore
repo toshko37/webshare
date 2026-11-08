@@ -107,3 +107,6 @@ logs/
 trash/
 src/.chat-guard-state.json
 tmp/
+
+# Claude Code instructions: local only (it contained internal server details)
+CLAUDE.md

@@ -59,7 +59,7 @@ $d = decryptFile("$tmp/v1m.enc", 'old');
 t('v1 file with "WSE2" IV still decrypts', $d['success'] && $d['data'] === $plain);
 
 echo "I3 metadata key\n";
-t('key id includes folder', encryptionKeyId('a.txt.enc', 'dimo/sub') === 'dimo/sub/a.txt.enc');
+t('key id includes folder', encryptionKeyId('a.txt.enc', 'alice/sub') === 'alice/sub/a.txt.enc');
 t('verify by decryption, no metadata needed', verifyEncryptionPassword('x', 'old', "$tmp/v1.enc") && !verifyEncryptionPassword('x', 'bad', "$tmp/v1.enc"));
 
 if (in_array('--big', $argv)) {
