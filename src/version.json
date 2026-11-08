@@ -1,6 +1,6 @@
 {
-    "version": "3.7.0",
+    "version": "3.7.1",
     "released": "2026-11-08",
-    "changelog": "Upload Guard for anonymous uploads, UI/UX accessibility and mobile overhaul",
+    "changelog": "Security hardening: open redirect, API encryption, brute-force limits, fail2ban, robots",
     "download_url": "https://webshare.techbg.net/"
 }

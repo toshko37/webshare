@@ -2,6 +2,24 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.7.1] - 2026-11-08
+
+### Security fixes
+- **Open redirect after login.** `?redirect=` now accepts only paths on the same site. Absolute URLs and `//host` are rejected.
+- **API upload with encryption.** It crashed with a fatal error. It now encrypts correctly and removes the unencrypted copy.
+- **Update channel switch.** It crashed because it called a missing CSRF function. It now checks CSRF and admin rights.
+- **Internal files are no longer served.** README/SECURITY `.md` files, `.bak` and editor leftover files, and the GeoIP database now return 403. `CHANGELOG.md` stays public for beta updates.
+- **Brute-force limit for passwords.**
+  - Folder share passwords: 10 wrong attempts per IP in 15 minutes.
+  - Encrypted public files: the same limit.
+- **fail2ban support.** Failed logins and password attempts write a fixed line to the PHP error log: `WebShare auth failure: where=<scope> ip=<ip>`. The filter example is in `docs/security-hardening.md`.
+- **Search engines.** A new `robots.txt` disallows everything, and every response sends `X-Robots-Tag: noindex, nofollow`.
+
+### Other
+- **New `auth-guard.php`.** It is shipped by live update.
+- **New `tools/webshare-backup.sh`.** It takes daily hard-link snapshots of user files and metadata. See `docs/backup.md`.
+- **Folder share errors in Bulgarian.** The wrong-password message is now in Bulgarian.
+
 ## [3.7.0] - 2026-11-08
 
 ### Upload Guard: protection for anonymous uploads (/u)
@@ -751,6 +769,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.7.1  | 2026-11-08 | Security hardening: open redirect, API encryption, brute-force limits, fail2ban, robots |
 |  3.7.0  | 2026-11-08 | Upload Guard for anonymous uploads, UI/UX accessibility and mobile overhaul |
 |  3.6.20  | 2026-09-27 | Free disk space indicator in header |
 |  3.6.19  | 2026-09-27 | File selection checkboxes & bulk delete |
