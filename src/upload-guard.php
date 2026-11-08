@@ -26,6 +26,8 @@ const UG_DELETE_WINDOW = 900;
 
 // ── Configuration ──────────────────────────────────────────────────────────
 
+require_once __DIR__ . '/auth-guard.php';
+
 function ug_defaults() {
     return [
         'mode'               => 'verified', // verified | open | login
@@ -43,6 +45,7 @@ function ug_defaults() {
         'curl_without_pass'  => false,
         'block_dangerous'    => true,
         'notify_owner'       => true,
+        'trusted_networks'   => [],         // F9: IPs/CIDRs without per-IP limits (e.g. a LAN behind one NAT address)
     ];
 }
 
@@ -100,6 +103,17 @@ function ug_sanitize_config(array $in, array $current) {
     // Empty secret field keeps the stored secret (it is never echoed back to the form)
     if (isset($in['turnstile_secret']) && trim($in['turnstile_secret']) !== '') {
         $out['turnstile_secret'] = trim(preg_replace('/[^A-Za-z0-9_\-\.]/', '', $in['turnstile_secret']));
+    }
+    if (isset($in['trusted_networks'])) {
+        $list = is_array($in['trusted_networks']) ? $in['trusted_networks']
+            : preg_split('/[\s,]+/', trim((string)$in['trusted_networks']), -1, PREG_SPLIT_NO_EMPTY);
+        $out['trusted_networks'] = array_values(array_unique(array_filter(array_map('trim', $list), function ($e) {
+            [$ip, $bits] = array_pad(explode('/', $e, 2), 2, null);
+            if (!filter_var($ip, FILTER_VALIDATE_IP)) return false;
+            if ($bits === null) return true;
+            $max = strpos($ip, ':') !== false ? 128 : 32;
+            return ctype_digit($bits) && (int)$bits <= $max;
+        })));
     }
     foreach (['curl_without_pass', 'block_dangerous', 'notify_owner'] as $b) {
         if (array_key_exists($b, $in)) $out[$b] = (bool)$in[$b];
@@ -286,8 +300,15 @@ function ug_verify_turnstile($token, $cfg) {
  * Check the per-IP limits before running a verification.
  * @return true|string
  */
+/** F9: requests from trusted networks are exempt from the per-IP limits */
+function ug_ip_trusted($cfg, $ip = null) {
+    $list = $cfg['trusted_networks'] ?? [];
+    return $list && ws_ip_in_list($ip ?? ug_client_ip(), $list);
+}
+
 function ug_ip_may_verify($cfg) {
     $ip = ug_client_ip();
+    if (ug_ip_trusted($cfg, $ip)) return true;
     $s = ug_read_json(UG_STATE_FILE) ?? [];
     $hourAgo = time() - 3600;
     $issued = count(array_filter($s['ip_passes'][$ip] ?? [], fn($t) => $t > $hourAgo));

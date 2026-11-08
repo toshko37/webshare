@@ -60,11 +60,12 @@ function generateMessageId() {
     return 'msg_' . bin2hex(random_bytes(8));
 }
 
+// I4: a POST request changes what it loads, so it holds the file's lock from load to save
+require_once __DIR__ . '/json-store.php';
+
 function loadMetadata($file) {
-    if (!file_exists($file)) {
-        return [];
-    }
-    return json_decode(file_get_contents($file), true) ?? [];
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') ws_json_mutex($file);
+    return ws_json_read($file);
 }
 
 function saveMetadata($file, $data) {
@@ -72,10 +73,8 @@ function saveMetadata($file, $data) {
 }
 
 function loadConversation($jsonPath) {
-    if (!file_exists($jsonPath)) {
-        return ['messages' => []];
-    }
-    return json_decode(file_get_contents($jsonPath), true) ?? ['messages' => []];
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') ws_json_mutex($jsonPath);   // I4
+    return ws_json_read($jsonPath, ['messages' => []]);
 }
 
 function saveConversation($jsonPath, $conversation) {

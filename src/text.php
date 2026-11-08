@@ -315,16 +315,16 @@ function generateToken($bytes = 8) {
     return bin2hex(random_bytes($bytes));
 }
 
+// I4: a POST request changes what it loads, so it holds the file's lock from load to save
+require_once __DIR__ . '/json-store.php';
+
 function loadMetadata($file) {
-    if (!file_exists($file)) {
-        return [];
-    }
-    $content = file_get_contents($file);
-    return json_decode($content, true) ?? [];
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') ws_json_mutex($file);
+    return ws_json_read($file);
 }
 
 function saveMetadata($file, $data) {
-    file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT));
+    file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT), LOCK_EX);
 }
 
 function cleanupExpiredTexts($textsDir, $metadataFile) {

@@ -190,7 +190,7 @@ $result = $mailer->send($toEmail, $subject, $htmlBody, $fromName);
 if ($result) {
     // Update rate limit
     $rateLimit[$clientIp][] = $now;
-    file_put_contents($rateLimitFile, json_encode($rateLimit));
+    file_put_contents($rateLimitFile, json_encode($rateLimit), LOCK_EX);
 
     // Audit log
     $currentUser = getCurrentUser();

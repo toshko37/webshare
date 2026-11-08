@@ -26,15 +26,20 @@ function loadSiteConfig() {
 
 // Load folder shares
 function loadFolderShares() {
-    if (file_exists(FOLDER_SHARES_FILE)) {
-        return json_decode(file_get_contents(FOLDER_SHARES_FILE), true) ?: [];
-    }
-    return [];
+    return ws_json_read(FOLDER_SHARES_FILE);
+}
+
+// I4: +1 view under the lock (parallel views/downloads must not overwrite each other or a share change)
+function folderShareCountView($token) {
+    ws_json_update(FOLDER_SHARES_FILE, function (&$shares) use ($token) {
+        if (!isset($shares[$token])) return false;
+        $shares[$token]['views'] = ($shares[$token]['views'] ?? 0) + 1;
+    });
 }
 
 // Save folder shares
 function saveFolderShares($shares) {
-    file_put_contents(FOLDER_SHARES_FILE, json_encode($shares, JSON_PRETTY_PRINT));
+    file_put_contents(FOLDER_SHARES_FILE, json_encode($shares, JSON_PRETTY_PRINT), LOCK_EX);
 }
 
 // Send email notification
@@ -239,8 +244,7 @@ if ($action === 'file' && $isAuthenticated && isset($_GET['path'])) {
 
     if (file_exists($fullPath) && is_file($fullPath) && strpos(realpath($fullPath), realpath($folderPath)) === 0) {
         // Increment view count
-        $shares[$token]['views'] = ($shares[$token]['views'] ?? 0) + 1;
-        saveFolderShares($shares);
+        folderShareCountView($token);
 
         writeAuditLog('folder_download', "Downloaded: {$share['folder']}/$filePath");
 
@@ -343,8 +347,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_file']) && $is
 
 // Increment view count for page views
 if ($isAuthenticated && $action === '') {
-    $shares[$token]['views'] = ($shares[$token]['views'] ?? 0) + 1;
-    saveFolderShares($shares);
+    folderShareCountView($token);
 }
 
 // Get folder contents

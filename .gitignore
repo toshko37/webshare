@@ -99,3 +99,6 @@ src/.auth-attempts.json
 
 # Auth failure log for fail2ban (installer/harden.sh)
 logs/
+
+# Lock files of the JSON store (src/json-store.php)
+*.json.lock

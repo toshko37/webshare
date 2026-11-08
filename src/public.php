@@ -9,6 +9,7 @@ require_once __DIR__ . '/encryption.php';
 require_once __DIR__ . '/folder-management.php';
 require_once __DIR__ . '/error-page.php';
 require_once __DIR__ . '/auth-guard.php';
+require_once __DIR__ . '/json-store.php';
 
 $tokensFile = __DIR__ . '/.tokens.json';
 $filesDir = __DIR__ . '/files/';
@@ -22,11 +23,7 @@ if (empty($token)) {
 
 // Load tokens
 function loadTokens($tokensFile) {
-    if (file_exists($tokensFile)) {
-        $content = file_get_contents($tokensFile);
-        return json_decode($content, true) ?: [];
-    }
-    return [];
+    return ws_json_read($tokensFile);   // I4: shared lock
 }
 
 $tokens = loadTokens($tokensFile);

@@ -7,6 +7,7 @@
 
 // Include geo functions for country lookup
 require_once __DIR__ . '/geo-check.php';
+require_once __DIR__ . '/json-store.php';
 
 define('AUDIT_LOG_FILE', __DIR__ . '/.audit.json');
 define('AUDIT_MAX_ENTRIES', 500);      // Entries per file
@@ -57,13 +58,6 @@ function rotateAuditLog($overflow) {
 function writeAuditLog($action, $details = '', $user = null) {
     $logFile = AUDIT_LOG_FILE;
 
-    // Load existing log
-    $log = [];
-    if (file_exists($logFile)) {
-        $content = file_get_contents($logFile);
-        $log = json_decode($content, true) ?? [];
-    }
-
     // Get user info
     if ($user === null) {
         $user = $_SESSION['username'] ?? 'anonymous';
@@ -88,20 +82,14 @@ function writeAuditLog($action, $details = '', $user = null) {
         'user_agent' => substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 200)
     ];
 
-    // Add to beginning of log (newest first)
-    array_unshift($log, $entry);
-
-    // Check if rotation needed
-    if (count($log) > AUDIT_MAX_ENTRIES) {
-        // Split: keep first 500, rotate the rest
-        $overflow = array_slice($log, AUDIT_MAX_ENTRIES);
-        $log = array_slice($log, 0, AUDIT_MAX_ENTRIES);
-
-        rotateAuditLog($overflow);
-    }
-
-    // Save log with file locking
-    file_put_contents($logFile, json_encode($log, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), LOCK_EX);
+    // I4: read, prepend and rotate under one lock, so parallel requests do not drop entries
+    ws_json_update($logFile, function (&$log) use ($entry) {
+        array_unshift($log, $entry);   // newest first
+        if (count($log) > AUDIT_MAX_ENTRIES) {
+            rotateAuditLog(array_slice($log, AUDIT_MAX_ENTRIES));
+            $log = array_slice($log, 0, AUDIT_MAX_ENTRIES);
+        }
+    }, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
 }
 
 /**

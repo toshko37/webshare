@@ -107,3 +107,27 @@ function ws_safe_redirect($dest, $fallback = '/') {
     }
     return $dest;
 }
+
+/** True when $ip equals an entry or falls inside a CIDR in $list (IPv4 and IPv6) */
+function ws_ip_in_list($ip, array $list) {
+    $bin = @inet_pton($ip);
+    if ($bin === false) return false;
+    foreach ($list as $entry) {
+        $entry = trim((string)$entry);
+        if (strpos($entry, '/') === false) {
+            if (@inet_pton($entry) === $bin) return true;
+            continue;
+        }
+        [$net, $bits] = explode('/', $entry, 2);
+        $netBin = @inet_pton($net);
+        $bits = (int)$bits;
+        if ($netBin === false || strlen($netBin) !== strlen($bin) || $bits < 0 || $bits > strlen($bin) * 8) continue;
+        $bytes = intdiv($bits, 8);
+        $rem = $bits % 8;
+        if (substr($bin, 0, $bytes) !== substr($netBin, 0, $bytes)) continue;
+        if ($rem === 0) return true;
+        $mask = chr((0xFF << (8 - $rem)) & 0xFF);
+        if ((substr($bin, $bytes, 1) & $mask) === (substr($netBin, $bytes, 1) & $mask)) return true;
+    }
+    return false;
+}

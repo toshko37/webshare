@@ -7,6 +7,8 @@
 
 // Include folder management
 require_once __DIR__ . '/folder-management.php';
+// I4: locked read-modify-write for the JSON files
+require_once __DIR__ . '/json-store.php';
 
 if (!defined('USERS_FILE'))   define('USERS_FILE',   __DIR__ . '/.users.json');
 if (!defined('SESSIONS_DIR')) define('SESSIONS_DIR', __DIR__ . '/.sessions/');
@@ -14,8 +16,7 @@ if (!defined('SESSIONS_DIR')) define('SESSIONS_DIR', __DIR__ . '/.sessions/');
 // ── User CRUD ─────────────────────────────────────────────────────────────
 
 function loadUsers() {
-    if (!file_exists(USERS_FILE)) return [];
-    return json_decode(file_get_contents(USERS_FILE), true) ?? [];
+    return ws_json_read(USERS_FILE);
 }
 
 function saveUsers($users) {
@@ -51,13 +52,15 @@ function addUser($username, $password, $role = 'user') {
     if ($err = passwordProblem($password)) {
         return ['success' => false, 'error' => $err];
     }
-    $users = loadUsers();
-    $users[$username] = [
-        'password_hash' => password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]),
-        'role'          => $role,
-        'created'       => time()
-    ];
-    saveUsers($users);
+    $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
+    $added = ws_json_update(USERS_FILE, function (&$users) use ($username, $hash, $role) {
+        if (isset($users[$username])) return false;   // created meanwhile
+        $users[$username] = ['password_hash' => $hash, 'role' => $role, 'created' => time()];
+        return true;
+    });
+    if (!$added) {
+        return ['success' => false, 'error' => 'Потребителят вече съществува'];
+    }
     createUserFolder($username);
     return ['success' => true];
 }
@@ -69,9 +72,11 @@ function changePassword($username, $newPassword) {
     if ($err = passwordProblem($newPassword)) {
         return ['success' => false, 'error' => $err];
     }
-    $users = loadUsers();
-    $users[$username]['password_hash'] = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 12]);
-    saveUsers($users);
+    $hash = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 12]);
+    ws_json_update(USERS_FILE, function (&$users) use ($username, $hash) {
+        if (!isset($users[$username])) return false;
+        $users[$username]['password_hash'] = $hash;
+    });
     return ['success' => true];
 }
 
@@ -79,12 +84,14 @@ function deleteUser($username) {
     if (!userExists($username)) {
         return ['success' => false, 'error' => 'Потребителят не е намерен'];
     }
-    $users = loadUsers();
-    if (count($users) <= 1) {
+    $deleted = ws_json_update(USERS_FILE, function (&$users) use ($username) {
+        if (count($users) <= 1 || !isset($users[$username])) return false;
+        unset($users[$username]);
+        return true;
+    });
+    if (!$deleted) {
         return ['success' => false, 'error' => 'Не може да се изтрие последният потребител'];
     }
-    unset($users[$username]);
-    saveUsers($users);
     // Close all sessions for deleted user
     logoffAllForUser($username);
     // Delete user's folder and all files inside
@@ -96,10 +103,11 @@ function deleteUser($username) {
 
 function setUserRole($username, $role) {
     if (!userExists($username)) return false;
-    $users = loadUsers();
-    $users[$username]['role'] = $role;
-    saveUsers($users);
-    return true;
+    return ws_json_update(USERS_FILE, function (&$users) use ($username, $role) {
+        if (!isset($users[$username])) return false;
+        $users[$username]['role'] = $role;
+        return true;
+    }) !== false;
 }
 
 /**
@@ -229,11 +237,7 @@ define('FILES_META_FILE', __DIR__ . '/.files-meta.json');
  * Load files metadata
  */
 function loadFilesMeta() {
-    if (file_exists(FILES_META_FILE)) {
-        $content = file_get_contents(FILES_META_FILE);
-        return json_decode($content, true) ?? [];
-    }
-    return [];
+    return ws_json_read(FILES_META_FILE);
 }
 
 /**
@@ -250,17 +254,12 @@ function saveFilesMeta($data) {
  * @param string|null $folder Folder name (null = old style, no folder)
  */
 function recordFileUpload($filename, $user = null, $folder = null) {
-    $meta = loadFilesMeta();
-
     // Use folder/filename as key if folder is specified
     $key = $folder ? ($folder . '/' . $filename) : $filename;
-
-    $meta[$key] = [
-        'uploader' => $user ?? getCurrentUser(),
-        'uploaded_at' => time(),
-        'folder' => $folder
-    ];
-    saveFilesMeta($meta);
+    $entry = ['uploader' => $user ?? getCurrentUser(), 'uploaded_at' => time(), 'folder' => $folder];
+    ws_json_update(FILES_META_FILE, function (&$meta) use ($key, $entry) {
+        $meta[$key] = $entry;
+    });
 }
 
 /**
@@ -275,21 +274,21 @@ function getFileOwner($filename) {
  * Remove file from metadata
  */
 function removeFileMeta($filename) {
-    $meta = loadFilesMeta();
-    unset($meta[$filename]);
-    saveFilesMeta($meta);
+    ws_json_update(FILES_META_FILE, function (&$meta) use ($filename) {
+        if (!isset($meta[$filename])) return false;
+        unset($meta[$filename]);
+    });
 }
 
 /**
  * Update filename in metadata (for rename)
  */
 function renameFileMeta($oldName, $newName) {
-    $meta = loadFilesMeta();
-    if (isset($meta[$oldName])) {
+    ws_json_update(FILES_META_FILE, function (&$meta) use ($oldName, $newName) {
+        if (!isset($meta[$oldName])) return false;
         $meta[$newName] = $meta[$oldName];
         unset($meta[$oldName]);
-        saveFilesMeta($meta);
-    }
+    });
 }
 
 /**
@@ -304,7 +303,8 @@ function syncFilesMeta() {
         return ['added' => 0, 'removed' => 0];
     }
 
-    $meta = loadFilesMeta();
+    // I4: the scan runs under the lock so uploads recorded meanwhile are not overwritten
+    return ws_json_update(FILES_META_FILE, function (&$meta) use ($filesDir) {
     $actualFiles = [];
     $added = 0;
     $removed = 0;
@@ -360,12 +360,10 @@ function syncFilesMeta() {
         }
     }
 
-    // Save if anything changed
-    if ($added > 0 || $removed > 0) {
-        saveFilesMeta($meta);
-    }
-
-    return ['added' => $added, 'removed' => $removed];
+    // Write only if anything changed (false = no write)
+    $stats = ['added' => $added, 'removed' => $removed];
+    return ($added > 0 || $removed > 0) ? $stats : false;
+    }) ?: ['added' => 0, 'removed' => 0];
 }
 
 // ============================================
@@ -378,11 +376,7 @@ define('API_KEYS_FILE', __DIR__ . '/.api-keys.json');
  * Load API keys
  */
 function loadApiKeys() {
-    if (file_exists(API_KEYS_FILE)) {
-        $content = file_get_contents(API_KEYS_FILE);
-        return json_decode($content, true) ?? [];
-    }
-    return [];
+    return ws_json_read(API_KEYS_FILE);
 }
 
 /**
@@ -594,64 +588,46 @@ function ipInCidr($ip, $cidr) {
  * @return string|array|null Username (or array if $returnDetails), null if invalid
  */
 function validateApiKey($apiKey, $clientIp = null, $returnDetails = false, $touch = true) {
-    $keys = loadApiKeys();
-    $migrated = migrateApiKeysFormat($keys);
-    if ($migrated) {
-        saveApiKeys($keys);
-    }
     if (!is_string($apiKey) || $apiKey === '') {
         return null;
     }
     $apiKeyHash = hash('sha256', $apiKey);
-
     if ($clientIp === null) {
         $clientIp = $_SERVER['REMOTE_ADDR'] ?? null;
     }
 
-    foreach ($keys as $username => $data) {
-        if (!isset($data['keys'])) continue;
-
-        foreach ($data['keys'] as $idx => $keyData) {
-            if (isset($keyData['key_hash']) && hash_equals($keyData['key_hash'], $apiKeyHash)) {
+    // I4: lookup and last_used / IP learning in one locked update, so parallel
+    // API uploads do not overwrite each other's changes (or a newly created key)
+    $out = null;
+    ws_json_update(API_KEYS_FILE, function (&$keys) use ($apiKeyHash, $clientIp, $returnDetails, $touch, &$out) {
+        $changed = migrateApiKeysFormat($keys);
+        foreach ($keys as $username => $data) {
+            if (!isset($data['keys'])) continue;
+            foreach ($data['keys'] as $idx => $keyData) {
+                if (!isset($keyData['key_hash']) || !hash_equals($keyData['key_hash'], $apiKeyHash)) continue;
+                $details = ['user' => $username, 'key_id' => $keyData['id'], 'key_name' => $keyData['name']];
                 if (!$touch) {
                     // Lookup only (script download): no IP learning, no last_used update
-                    return $returnDetails ? ['user' => $username, 'key_id' => $keyData['id'], 'key_name' => $keyData['name']] : $username;
+                    $out = $returnDetails ? $details : $username;
+                    return $changed;
                 }
-                $allowedIps = $keyData['allowed_ips'];
-                $keyId = $keyData['id'];
-                $keyName = $keyData['name'];
-
-                // Auto-learn mode: if allowed_ips is null or empty, learn the IP
+                $allowedIps = $keyData['allowed_ips'] ?? null;
                 if (($allowedIps === null || empty($allowedIps)) && $clientIp) {
+                    // Auto-learn mode: the first client IP becomes the allowed one
                     $keys[$username]['keys'][$idx]['allowed_ips'] = [$clientIp];
-                    $keys[$username]['keys'][$idx]['last_used'] = time();
                     $keys[$username]['keys'][$idx]['learned_ip'] = true;
-                    saveApiKeys($keys);
-
-                    if ($returnDetails) {
-                        return ['user' => $username, 'key_id' => $keyId, 'key_name' => $keyName, 'learned_ip' => $clientIp];
-                    }
-                    return $username;
+                    $details['learned_ip'] = $clientIp;
+                } elseif (!isIpAllowed($clientIp, $allowedIps)) {
+                    return $changed;   // IP not allowed: $out stays null
                 }
-
-                // Check IP restriction (0.0.0.0/0 allows all)
-                if (!isIpAllowed($clientIp, $allowedIps)) {
-                    return null; // IP not allowed
-                }
-
-                // Update last used timestamp
                 $keys[$username]['keys'][$idx]['last_used'] = time();
-                saveApiKeys($keys);
-
-                if ($returnDetails) {
-                    return ['user' => $username, 'key_id' => $keyId, 'key_name' => $keyName];
-                }
-                return $username;
+                $out = $returnDetails ? $details : $username;
+                return true;
             }
         }
-    }
-
-    return null;
+        return $changed;
+    });
+    return $out;
 }
 
 /**

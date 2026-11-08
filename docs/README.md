@@ -24,6 +24,7 @@ php tests/security-unit.php                               # unit, защита �
 tests/security-test.sh https://webshare.techbg.net        # end-to-end, като root на сървъра
 php -d memory_limit=128M tests/encryption-unit.php --big  # криптиране v1/v2, 300 MB на поток
 php tests/manifest-test.php                               # списъците на файловете са в синхрон
+php tests/json-store-test.php                             # паралелни записи в JSON (I4)
 ```
 
 ## Правила за документацията

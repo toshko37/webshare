@@ -273,6 +273,7 @@ if [ ${#PHP_FILES[@]} -eq 0 ]; then
         "upload-guard.php"
         "error-page.php"
         "auth-guard.php"
+        "json-store.php"
         "public.php"
         "download.php"
         "t.php"

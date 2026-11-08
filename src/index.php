@@ -728,13 +728,14 @@ if (isset($_POST['rename']) && isset($_POST['old_name']) && isset($_POST['new_na
         // Update share tokens
         $tokensFile = __DIR__ . '/.tokens.json';
         if (file_exists($tokensFile)) {
+            ws_json_mutex($tokensFile);   // I4: hold the lock until this request ends
             $tokens = json_decode(file_get_contents($tokensFile), true) ?? [];
             foreach ($tokens as $token => &$filename) {
                 if ($filename === $oldName) {
                     $filename = $newName;
                 }
             }
-            file_put_contents($tokensFile, json_encode($tokens, JSON_PRETTY_PRINT));
+            file_put_contents($tokensFile, json_encode($tokens, JSON_PRETTY_PRINT), LOCK_EX);
         }
 
         // Update file ownership metadata
@@ -762,6 +763,7 @@ if (isset($_POST['delete'])) {
             // Also remove from share tokens
             $tokensFile = __DIR__ . '/.tokens.json';
             if (file_exists($tokensFile)) {
+                ws_json_mutex($tokensFile);   // I4: hold the lock until this request ends
                 $tokens = json_decode(file_get_contents($tokensFile), true) ?? [];
                 $tokens = array_filter($tokens, function($data) use ($filename, $currentFolder) {
                     // Handle both old format (string) and new format (array)
@@ -770,7 +772,7 @@ if (isset($_POST['delete'])) {
                     }
                     return $data !== $filename;
                 });
-                file_put_contents($tokensFile, json_encode($tokens, JSON_PRETTY_PRINT));
+                file_put_contents($tokensFile, json_encode($tokens, JSON_PRETTY_PRINT), LOCK_EX);
             }
             // Remove file ownership metadata (try both old and new key formats)
             removeFileMeta($filename);
@@ -811,6 +813,7 @@ if (isset($_POST['move_file']) && isset($_POST['to_folder'])) {
         // Update share tokens if the file had one
         $tokensFile = __DIR__ . '/.tokens.json';
         if (file_exists($tokensFile)) {
+            ws_json_mutex($tokensFile);   // I4: hold the lock until this request ends
             $tokens = json_decode(file_get_contents($tokensFile), true) ?? [];
             foreach ($tokens as $token => &$data) {
                 if (is_array($data) && $data['filename'] === $filename) {
@@ -825,7 +828,7 @@ if (isset($_POST['move_file']) && isset($_POST['to_folder'])) {
                     ];
                 }
             }
-            file_put_contents($tokensFile, json_encode($tokens, JSON_PRETTY_PRINT));
+            file_put_contents($tokensFile, json_encode($tokens, JSON_PRETTY_PRINT), LOCK_EX);
         }
 
         // Audit log
@@ -882,14 +885,11 @@ if (isset($_POST['delete_subfolder'])) {
 define('FOLDER_SHARES_FILE', __DIR__ . '/.folder-shares.json');
 
 function loadFolderShares() {
-    if (file_exists(FOLDER_SHARES_FILE)) {
-        return json_decode(file_get_contents(FOLDER_SHARES_FILE), true) ?: [];
-    }
-    return [];
+    return ws_json_read(FOLDER_SHARES_FILE);
 }
 
 function saveFolderShares($shares) {
-    file_put_contents(FOLDER_SHARES_FILE, json_encode($shares, JSON_PRETTY_PRINT));
+    file_put_contents(FOLDER_SHARES_FILE, json_encode($shares, JSON_PRETTY_PRINT), LOCK_EX);
 }
 
 // Handle folder share creation
@@ -916,6 +916,7 @@ if (isset($_POST['create_folder_share'])) {
 
     // Generate token
     $token = bin2hex(random_bytes(16));
+    ws_json_mutex(FOLDER_SHARES_FILE);   // I4
     $shares = loadFolderShares();
 
     // Check if folder already shared
@@ -967,6 +968,7 @@ if (isset($_POST['delete_folder_share'])) {
     header('Content-Type: application/json');
 
     $token = $_POST['delete_folder_share'];
+    ws_json_mutex(FOLDER_SHARES_FILE);   // I4
     $shares = loadFolderShares();
 
     if (!isset($shares[$token])) {
@@ -995,6 +997,7 @@ if (isset($_POST['regenerate_folder_token'])) {
     header('Content-Type: application/json');
 
     $oldToken = $_POST['regenerate_folder_token'];
+    ws_json_mutex(FOLDER_SHARES_FILE);   // I4
     $shares = loadFolderShares();
 
     if (!isset($shares[$oldToken])) {
@@ -1058,9 +1061,10 @@ usort($files, function($a, $b) {
 $textsMetadataFile = __DIR__ . '/.texts.json';
 $textsDir = __DIR__ . '/texts/';
 
-// Cleanup expired texts/conversations
+// Cleanup expired texts/conversations (I4: under the lock, so a chat created meanwhile is kept)
 if (file_exists($textsMetadataFile)) {
-    $textsData = json_decode(file_get_contents($textsMetadataFile), true) ?? [];
+    ws_json_mutex($textsMetadataFile);
+    $textsData = ws_json_read($textsMetadataFile);
     $now = time();
     $changed = false;
     foreach ($textsData as $token => $info) {
@@ -1079,8 +1083,9 @@ if (file_exists($textsMetadataFile)) {
         }
     }
     if ($changed) {
-        file_put_contents($textsMetadataFile, json_encode($textsData, JSON_PRETTY_PRINT));
+        file_put_contents($textsMetadataFile, json_encode($textsData, JSON_PRETTY_PRINT), LOCK_EX);
     }
+    ws_json_mutex_release($textsMetadataFile);   // the page goes on rendering: do not hold it
 }
 
 // Load conversations for display
@@ -3697,6 +3702,10 @@ function getRecentChanges($limit = 8) {
                             </label>
                             <?php endforeach; ?>
                         </div>
+
+                        <label for="ug_trusted_networks" style="display:block;font-size:13px;margin-top:14px;">Trusted networks (no per-IP limits)</label>
+                        <input type="text" id="ug_trusted_networks" name="trusted_networks" value="<?= htmlspecialchars(implode(', ', $ugCfg['trusted_networks'] ?? [])) ?>" placeholder="e.g. 192.168.22.0/24" style="padding:8px;border:1px solid #ddd;border-radius:8px;width:100%;margin-top:4px;">
+                        <small style="color:#6B6B6B;">IPs or CIDRs, comma separated. Useful when a whole LAN reaches WebShare through one address. These addresses still pass the robot check and the per-pass, per-file, daily and disk limits; only "<?= (int)$ugCfg['passes_per_ip_hour'] ?> passes per IP per hour" and the failed-check lockout are skipped.</small>
 
                         <div style="margin-top:14px;display:flex;flex-direction:column;gap:8px;font-size:14px;">
                             <label><input type="checkbox" name="block_dangerous" <?= $ugCfg['block_dangerous'] ? 'checked' : '' ?>> Block script files and hidden files (.php, .phtml, .htaccess …)</label>

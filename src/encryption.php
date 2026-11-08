@@ -5,6 +5,7 @@
  * Handles file encryption/decryption with AES-256-GCM
  */
 
+require_once __DIR__ . '/json-store.php';
 define('ENCRYPTION_KEYS_FILE', __DIR__ . '/.encryption-keys.json');
 define('ENCRYPTION_ALGORITHM', 'aes-256-gcm');
 define('ENCRYPTED_EXTENSION', '.enc');
@@ -281,19 +282,19 @@ function getOriginalFilename($encryptedFilename) {
  * @param string $uploader User who encrypted the file
  */
 function storeEncryptionPassword($filename, $password, $uploader, $folder = null) {
-    $keys = loadEncryptionKeys();
-
     // I3: keyed by folder/name so same-named files in different folders do not collide.
     // Metadata only: the password is verified by decryption itself.
-    $keys[encryptionKeyId($filename, $folder)] = [
+    $entry = [
         'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-        // Note: password_plain removed for security - only hash is stored
         'created_at' => time(),
         'created_by' => $uploader,
         'format' => 2
     ];
-
-    saveEncryptionKeys($keys);
+    $id = encryptionKeyId($filename, $folder);
+    ws_json_update(ENCRYPTION_KEYS_FILE, function (&$keys) use ($id, $entry) {   // I4
+        $keys[$id] = $entry;
+    });
+    @chmod(ENCRYPTION_KEYS_FILE, 0600);
 }
 
 /**
@@ -335,9 +336,11 @@ function verifyEncryptionPassword($filename, $password, $path = null) {
  * @param string $filename Encrypted filename
  */
 function removeEncryptionKey($filename, $folder = null) {
-    $keys = loadEncryptionKeys();
-    unset($keys[$filename], $keys[encryptionKeyId($filename, $folder)]);
-    saveEncryptionKeys($keys);
+    $id = encryptionKeyId($filename, $folder);
+    ws_json_update(ENCRYPTION_KEYS_FILE, function (&$keys) use ($filename, $id) {   // I4
+        if (!isset($keys[$filename]) && !isset($keys[$id])) return false;
+        unset($keys[$filename], $keys[$id]);
+    });
 }
 
 /**
@@ -345,11 +348,7 @@ function removeEncryptionKey($filename, $folder = null) {
  * @return array
  */
 function loadEncryptionKeys() {
-    if (!file_exists(ENCRYPTION_KEYS_FILE)) {
-        return [];
-    }
-    $content = file_get_contents(ENCRYPTION_KEYS_FILE);
-    return json_decode($content, true) ?? [];
+    return ws_json_read(ENCRYPTION_KEYS_FILE);
 }
 
 /**

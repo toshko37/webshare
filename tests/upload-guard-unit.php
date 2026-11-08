@@ -85,6 +85,18 @@ t('other IP is not affected', ug_ip_may_verify($lim) === true);
 for ($i = 0; $i < 30; $i++) ug_record_failure();
 t('30 failures block the IP', ug_ip_may_verify($lim) === 'ip_fail_limit');
 
+echo "== Trusted networks (F9)\n";
+$tn = ug_sanitize_config(['trusted_networks' => '192.168.22.0/24, 10.0.0.5, bad, 1.2.3.4/40, 2001:db8::/32'], ug_defaults());
+t('sanitize keeps valid IPs/CIDRs only', $tn['trusted_networks'] === ['192.168.22.0/24', '10.0.0.5', '2001:db8::/32']);
+t('default: no trusted networks', ug_defaults()['trusted_networks'] === []);
+$limT = array_merge($lim, ['trusted_networks' => ['198.51.100.0/24']]);
+t('blocked IP is exempt when its network is trusted', ug_ip_may_verify($limT) === true);
+$_SERVER['REMOTE_ADDR'] = '198.51.101.8';
+t('address outside the trusted network is not exempt', ug_ip_trusted($limT) === false);
+$_SERVER['REMOTE_ADDR'] = '2001:db8::1';
+t('IPv6 trusted network matches', ug_ip_trusted(['trusted_networks' => ['2001:db8::/32']]) === true);
+t('trusted IP still has the file size limit', ug_check_upload(array_merge(ug_defaults(), ['trusted_networks' => ['2001:db8::/32'], 'max_file_mb' => 1]), null, 2 * 1048576, 'a.txt', sys_get_temp_dir())[0] === 'file_too_large');
+
 echo "== Upload checks\n";
 $dir = "$tmp/files/"; mkdir($dir . '_public', 0700, true);
 $q = ['pass_max_files' => 2, 'pass_max_mb' => 1, 'max_file_mb' => 1, 'daily_cap_mb' => 3, 'min_free_gb' => 0] + $c;

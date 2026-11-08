@@ -25,16 +25,12 @@ $filesDir = __DIR__ . '/files/';
 
 // Load existing tokens
 function loadTokens($tokensFile) {
-    if (file_exists($tokensFile)) {
-        $content = file_get_contents($tokensFile);
-        return json_decode($content, true) ?: [];
-    }
-    return [];
+    return ws_json_read($tokensFile);   // I4: shared lock
 }
 
 // Save tokens
 function saveTokens($tokensFile, $tokens) {
-    file_put_contents($tokensFile, json_encode($tokens, JSON_PRETTY_PRINT));
+    file_put_contents($tokensFile, json_encode($tokens, JSON_PRETTY_PRINT), LOCK_EX);
     chmod($tokensFile, 0600); // Make it readable only by owner
 }
 
@@ -87,6 +83,11 @@ function shareResponse($token, $data, $extra = []) {
 
 // Handle requests
 $action = $_GET['action'] ?? '';
+
+// I4: actions that change .tokens.json hold its lock from load to save
+if (in_array($action, ['generate', 'regenerate', 'set_expiry', 'revoke'], true)) {
+    ws_json_mutex($tokensFile);
+}
 
 switch ($action) {
     case 'generate':

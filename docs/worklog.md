@@ -253,3 +253,26 @@
 - `tests/manifest-test.php`: 16/16.
 - `check-version.php` с админ сесия връща версията от GitHub, 3.7.1.
 - Chromium: без грешки в Files, Settings и Help.
+
+## 2026-11-08 · F3 отложено
+
+OIDC и SAML (F3) са обяснени на собственика и са отложени за по-късен етап. Статусът е в одита.
+
+## 2026-11-08 · F9 и I4
+
+Описание в [security-plan-2.md](security-plan-2.md), а решенията са D-024 и D-025.
+
+**Код**
+- Нов `src/json-store.php`. Добавен е в `manifest.txt`, в `live-update.php` и в резервните списъци на инсталаторите.
+- Променени:
+  - `upload-guard.php`, `auth-guard.php` (`ws_ip_in_list`), `geo-check.php`, `index.php` (F9);
+  - `user-management.php`, `audit-log.php`, `encryption.php`, `share.php`, `public.php`, `f.php`, `t.php`, `text.php`, `send-mail.php` и `index.php` (I4).
+- В `.gitignore` е добавено `*.json.lock`.
+
+**Данни.** В `.config.json` `upload_guard.trusted_networks` е `["192.168.22.0/24"]`. Тестовите пропуски са отменени, а тестовият чат е изтрит.
+
+**Тестове.** Всички минават:
+- `json-store-test` 9/9, `upload-guard-unit` 52/52;
+- `security-unit` 26/26, `manifest-test` 16/16, `encryption-unit` 35/35;
+- `security-test` 40/40, `upload-guard-test` 18/18;
+- в Chromium няма грешки на 11 страници, а 20 паралелни съобщения в чата са записани.
