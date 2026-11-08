@@ -236,8 +236,25 @@ fi
 # ============================================================
 echo -e "${CYAN}Step 3: Committing and pushing...${NC}"
 
-# Add version files + any other changed src files
-git add "$INDEX_PHP" "$VERSION_JSON" "$CHANGELOG_MD"
+# F5: sign the release (docs/decisions.md D-026). The signed hashes must match
+# the tagged commit, so nothing else in src/ may be uncommitted at this point.
+UNCOMMITTED=$(git status --porcelain -- src | grep -vE ' src/(index\.php|version\.json|CHANGELOG\.md|release-manifest\.(json|sig))$' || true)
+if [ -n "$UNCOMMITTED" ]; then
+    echo -e "${RED}Error: uncommitted changes in src/ (commit them before releasing):${NC}"
+    echo "$UNCOMMITTED"
+    git checkout -- "$INDEX_PHP" "$VERSION_JSON" "$CHANGELOG_MD"
+    exit 1
+fi
+if ! php "$SCRIPT_DIR/tools/sign-release.php" "$NEW_VERSION"; then
+    echo -e "${RED}Error: signing failed, release aborted${NC}"
+    git checkout -- "$INDEX_PHP" "$VERSION_JSON" "$CHANGELOG_MD"
+    exit 1
+fi
+php "$SCRIPT_DIR/tools/sign-release.php" --verify || { echo -e "${RED}Error: signature check failed${NC}"; exit 1; }
+echo -e "  ${GREEN}✓${NC} Release signed"
+
+# Add version files and the signed manifest
+git add "$INDEX_PHP" "$VERSION_JSON" "$CHANGELOG_MD" "$SRC_DIR/release-manifest.json" "$SRC_DIR/release-manifest.sig"
 
 # Show what's being committed
 STAGED=$(git diff --cached --name-only 2>/dev/null)
