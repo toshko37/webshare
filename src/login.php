@@ -16,6 +16,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 define('USERS_FILE', __DIR__ . '/.users.json');
 define('SESSIONS_DIR', __DIR__ . '/.sessions/');
+require_once __DIR__ . '/geo-check.php';    // upgrade bridge first (D-031)
 require_once __DIR__ . '/auth-guard.php';
 define('LOGIN_ATTEMPTS_FILE', __DIR__ . '/.login-attempts.json');
 define('MAX_LOGIN_ATTEMPTS', 5);

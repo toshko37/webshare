@@ -10,6 +10,7 @@
  * - encrypt_password: Password for encryption
  */
 
+require_once __DIR__ . '/geo-check.php';    // upgrade bridge before any newer file (D-031)
 require_once __DIR__ . '/user-management.php';
 
 // I11: POST only, so the key does not end up in access logs or browser history.

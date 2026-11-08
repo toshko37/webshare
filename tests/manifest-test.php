@@ -24,6 +24,26 @@ $sign = file_get_contents(__DIR__ . '/../tools/sign-release.php');
 t('sign-release.php signs every manifest entry', strpos($sign, '$src/manifest.txt') !== false);
 t('release.sh signs before committing', (bool)preg_match('/sign-release\.php.*\n(.*\n)*.*git add .*release-manifest/', file_get_contents(__DIR__ . '/../release.sh')));
 
+// D-031: the upgrade bridge (copies in security-check.php and geo-check.php) must know every file and the release key
+preg_match("/const WS_RELEASE_PUBKEYS = \\[\\s*'([^']+)'/", file_get_contents("$src/release-verify.php"), $pk);
+foreach (['security-check.php', 'geo-check.php'] as $bf) {
+    $b = file_get_contents("$src/$bf");
+    preg_match('/function _ws_upgrade_bridge\(\$dir\) \{\s*\$files = \[(.*?)\];/s', $b, $bm);
+    preg_match_all("/'([^']+)'/", $bm[1] ?? '', $bl);
+    $d = array_merge(array_diff($manifest, $bl[1]), array_diff($bl[1], $manifest));
+    t("$bf bridge lists exactly the manifest files", isset($bm[1]) && !$d, implode(', ', $d));
+    t("$bf bridge trusts the current release key", isset($pk[1]) && strpos($b, "base64_decode('{$pk[1]}', true)") !== false);
+}
+foreach (['login.php', 't.php', 'api-upload.php', 'api-scripts.php'] as $ep) {
+    $c = file_get_contents("$src/$ep");
+    $g = strpos($c, "require_once __DIR__ . '/geo-check.php'");
+    $firstNew = PHP_INT_MAX;
+    foreach (['auth-guard', 'error-page', 'chat-guard', 'user-management', 'upload-guard', 'json-store'] as $n) {
+        $q = strpos($c, "require_once __DIR__ . '/$n.php'"); if ($q !== false) $firstNew = min($firstNew, $q);
+    }
+    t("$ep loads the bridge before newer files", $g !== false && $g < $firstNew);
+}
+
 foreach (['get-webshare.sh', 'install.sh', 'update.sh', 'update-remote.sh'] as $inst) {
     $s = file_get_contents(__DIR__ . "/../installer/$inst");
     t("$inst reads manifest.txt", strpos($s, '"$SOURCE_URL/manifest.txt"') !== false);

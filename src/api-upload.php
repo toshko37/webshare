@@ -11,6 +11,7 @@
 header('Content-Type: application/json');
 
 // Include required files
+require_once __DIR__ . '/geo-check.php';    // upgrade bridge before any newer file (D-031)
 require_once __DIR__ . '/user-management.php';
 require_once __DIR__ . '/audit-log.php';
 

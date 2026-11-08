@@ -16,6 +16,8 @@ if (file_exists($configFile)) {
 }
 $speedtestUrl = $config['speedtest_url'] ?? '';
 
+require_once __DIR__ . '/geo-check.php';    // upgrade bridge before any newer file (D-031)
+
 // Require login if open_chat is disabled (default: open)
 if (!($config['open_chat'] ?? true)) {
     require_once __DIR__ . '/security-check.php';

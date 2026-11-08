@@ -1,4 +1,114 @@
 <?php
+// ── Upgrade bridge (since 3.9.1, docs/decisions.md D-031) ────────────────
+// Installs on 3.8.1 or older update through their OWN live-update.php, which
+// downloads only the files it knew about. Newer code needs more files, so the
+// first page load after such an update would end in a fatal error. geo-check.php is
+// on every old list and is loaded first by the public pages (copy of security-check.php): it fetches the missing files from the
+// signed release (tag of WEBSHARE_VERSION), checks the signature and every
+// hash, and only then lets the page continue. Self-contained on purpose.
+if (!function_exists('_ws_upgrade_bridge')) {
+function _ws_upgrade_bridge($dir) {
+    $files = [
+        'security-check.php',
+        'login.php',
+        'logout.php',
+        'index.php',
+        'upload.php',
+        'upload-guard.php',
+        'error-page.php',
+        'auth-guard.php',
+        'json-store.php',
+        'release-verify.php',
+        'trash.php',
+        'quota.php',
+        'chat-guard.php',
+        'link-preview.php',
+        'zip-job.php',
+        'public.php',
+        'download.php',
+        't.php',
+        'text.php',
+        'share.php',
+        'folder-management.php',
+        'encryption.php',
+        'audit-log.php',
+        'geo-check.php',
+        'user-management.php',
+        'html-sanitizer.php',
+        'smtp-mailer.php',
+        'send-mail.php',
+        'web-download.php',
+        'api-upload.php',
+        'api-scripts.php',
+        'check-version.php',
+        'do-update.php',
+        'live-update.php',
+        'p.php',
+        'u.php',
+        'f.php',
+        'get.php',
+        'get-speedtest.php',
+        'get-update.php',
+        'get-update-script.php',
+        'security-headers.php',
+        'ui-kit.css',
+        'ui-kit.js',
+        'favicon.ico',
+        'favicon.svg',
+        'apple-touch-icon.png',
+        'CHANGELOG.md',
+        'version.json',
+        'robots.txt',
+        'og-image.png',
+        'assets/quill/quill.js',
+        'assets/quill/quill.snow.css',
+    ];
+    $missing = array_values(array_filter($files, fn($f) => !is_file("$dir/$f")));
+    if (!$missing) return;
+    $lock = @fopen("$dir/.upgrade-bridge.lock", 'c');
+    if ($lock) flock($lock, LOCK_EX);
+    $missing = array_values(array_filter($missing, fn($f) => !is_file("$dir/$f")));   // another request may have finished
+    if (!$missing) return;
+    $fail = function ($why) use ($dir) {
+        http_response_code(503);
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<!DOCTYPE html><html lang="bg"><meta charset="utf-8"><title>WebShare: незавършено обновяване</title>'
+            . '<body style="font-family:sans-serif;max-width:640px;margin:40px auto;padding:0 16px">'
+            . '<h1>Обновяването не е завършено</h1><p>Липсват файлове от новата версия и не можаха да се изтеглят автоматично ('
+            . htmlspecialchars($why) . ').</p><p>Пусни на сървъра: <code>sudo ' . htmlspecialchars(dirname($dir)) . '/installer/update.sh -y</code> '
+            . 'или <code>curl -fsSL https://raw.githubusercontent.com/toshko37/webshare/main/installer/update.sh | sudo INSTALL_DIR=' . htmlspecialchars(dirname($dir)) . ' bash -s -- -y</code></p></body></html>';
+        exit;
+    };
+    if (!function_exists('sodium_crypto_sign_verify_detached') || !function_exists('curl_init')) $fail('php-sodium or php-curl is missing');
+    if (!preg_match("/WEBSHARE_VERSION['\"],\s*['\"](\d+\.\d+\.\d+)['\"]/", (string)@file_get_contents("$dir/index.php"), $vm)) $fail('version not found');
+    $base = 'https://raw.githubusercontent.com/toshko37/webshare/v' . $vm[1] . '/src/';
+    $get = function ($url) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => true, CURLOPT_TIMEOUT => 60,
+            CURLOPT_SSL_VERIFYPEER => true, CURLOPT_USERAGENT => 'WebShare-UpgradeBridge']);
+        $body = curl_exec($ch);
+        $ok = curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200;
+        curl_close($ch);
+        return $ok && is_string($body) ? $body : null;
+    };
+    $manifest = $get($base . 'release-manifest.json');
+    $sig = base64_decode(trim((string)$get($base . 'release-manifest.sig')), true);
+    $pub = base64_decode('26hboeSIRIWj+kGUw9QZA5N/pOBjBwU/YRUN96C3H1E=', true);
+    if ($manifest === null || $sig === false || strlen($sig) !== SODIUM_CRYPTO_SIGN_BYTES
+        || !sodium_crypto_sign_verify_detached($sig, $manifest, $pub)) $fail('release signature could not be verified');
+    $hashes = json_decode($manifest, true)['files'] ?? [];
+    foreach ($missing as $f) {
+        if (!isset($hashes[$f]) || !preg_match('#^[A-Za-z0-9._/-]+$#', $f) || strpos($f, '..') !== false) $fail("$f is not in the signed release");
+        $body = $get($base . $f);
+        if ($body === null || !hash_equals($hashes[$f], hash('sha256', $body))) $fail("$f could not be downloaded or failed its checksum");
+        @mkdir(dirname("$dir/$f"), 0755, true);
+        if (file_put_contents("$dir/$f.bridge-tmp", $body) === false || !rename("$dir/$f.bridge-tmp", "$dir/$f")) $fail("$f could not be written");
+    }
+    if (function_exists('opcache_reset')) @opcache_reset();
+    error_log('WebShare upgrade bridge: installed ' . implode(', ', $missing));
+}
+}
+_ws_upgrade_bridge(__DIR__);
 /**
  * GeoIP Check for WebShare
  * ========================
