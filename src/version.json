@@ -1,6 +1,6 @@
 {
-    "version": "3.8.1",
+    "version": "3.9.0",
     "released": "2026-11-09",
-    "changelog": "Upload Guard trusted networks, locked JSON storage",
+    "changelog": "Signed releases, trash, quotas, chat protection, link previews",
     "download_url": "https://webshare.techbg.net/"
 }

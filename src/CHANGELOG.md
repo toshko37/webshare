@@ -2,6 +2,40 @@
 
 All notable changes to WebShare will be documented in this file.
 
+## [3.9.0] - 2026-11-09
+
+### Signed releases (F5)
+- **Every release is now signed.** The release ships a signed list of all its files (Ed25519). Live update downloads from the release tag, checks the signature and the SHA-256 of every file, and installs nothing if anything does not match.
+- **This is the first signed release.** The update from 3.8.x to 3.9.0 uses the old method. Every update after that is verified.
+
+### Trash (F2)
+- **Deleted files go to the trash** and can be restored for 30 days. Share links and metadata come back on restore. The number of days is set in Settings → Trash; 0 turns the trash off.
+- **What else goes to the trash:**
+  - files deleted from a shared folder;
+  - versions replaced by an API upload;
+  - the folder of a deleted user, which only an admin can restore.
+
+### Storage quotas (F1)
+- **Per-user quotas.** Set a limit in MB for each user, plus a site default, in Settings → Storage Quotas.
+- **Every upload into a user's folder counts:** the user, admins, API keys, shared-folder uploads, anonymous uploads to /u/&lt;user&gt; and URL downloads.
+- **Not counted:** the trash and the Public folder.
+- **Upload errors are shown.** The admin uploader now displays the server's error message.
+
+### Chat protection (F8)
+- **New anonymous chats need an invisible browser check** (the same proof-of-work as Upload Guard).
+- **Limits:** new chats per IP per hour, and a maximum number of active chats.
+- **Exempt:** logged-in users, and trusted networks for the per-IP limit.
+
+### Link previews and folder ZIP (F7)
+- **Link previews.** Links shared in Viber, WhatsApp, Telegram and similar apps show a preview card.
+  - File links show the name and size.
+  - Folder links show the name and the number of files.
+  - Password-protected folders and chats never reveal their name or content.
+  - A setting in Settings → Public Access hides names from previews.
+- **"Download all" builds the ZIP in the background** and shows progress, so large folders no longer time out.
+- **Fixed: truncated names in folder ZIPs.** The first 4 characters of every file name were cut off.
+- **Fixed: leftover archives.** An interrupted ZIP download no longer leaves a large file in /tmp.
+
 ## [3.8.1] - 2026-11-09
 
 ### Upload Guard
@@ -823,6 +857,7 @@ Early development versions. Basic file upload/download functionality. No version
 
 | Version |    Date    | Highlights |
 |---------|------------|------------|
+|  3.9.0  | 2026-11-09 | Signed releases, trash, quotas, chat protection, link previews |
 |  3.8.1  | 2026-11-09 | Upload Guard trusted networks, locked JSON storage |
 |  3.8.0  | 2026-11-08 | Encryption v2, hashed API keys, link expiry, CSP, installer hardening; GitHub-only updates |
 |  3.7.1  | 2026-11-08 | Security hardening: open redirect, API encryption, brute-force limits, fail2ban, robots |
